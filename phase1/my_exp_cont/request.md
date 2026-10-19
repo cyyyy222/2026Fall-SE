@@ -232,7 +232,7 @@
 | 需求文件 | phase1/my_exp_cont/requirements.md，version5，2026/10/18 |
 | 汇总记录文件 | phase1/my_exp_cont/chat.txt |
 | lab1-ai-draft 完整提交哈希 | a3e693794e522596b4ecb543aa9df40fddde0674 |
-| lab1-final 完整提交哈希 |  |
+| lab1-final 完整提交哈希 | cbd3a0c3e9046a8d7cac773567fbddd226a485f2 |
 
 ---
 

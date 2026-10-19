@@ -1,0 +1,11 @@
+stateDiagram-v2
+    direction TB
+    state "有效" as validTicket
+    state "已验票" as usedTicket
+    state "已失效" as invalidTicket
+
+    [*] --> validTicket : 支付成功并出票
+    validTicket --> usedTicket : 有效账号在授权窗口内确认验票
+    validTicket --> invalidTicket : 成功退款或正常结束未签到
+    usedTicket --> usedTicket : 仍有权限时重复查询，仅返回首次签到结果
+    invalidTicket --> invalidTicket : 查询失效原因，不允许验票

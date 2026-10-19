@@ -1,0 +1,30 @@
+stateDiagram-v2
+    direction TB
+    state "候补中" as waiting
+    state "递补待确认" as pendingConfirmation
+    state "未支付" as unpaid
+    state "已报名" as enrolled
+    state "已签到" as checkedIn
+    state "已完成" as completed
+    state "已取消" as cancelled
+    state "已退款" as refunded
+    state "缺席" as absent
+
+    [*] --> unpaid : 合格新报名，有可直接分配名额
+    [*] --> waiting : 合格新报名，需要排队
+    waiting --> pendingConfirmation : 分配名额、占位与通知一并提交
+    waiting --> cancelled : 主动放弃、报名截止或活动终止
+    pendingConfirmation --> unpaid : 实际确认截止前确认，沿用占位
+    pendingConfirmation --> cancelled : 拒绝、超时、合法取消或活动终止
+    unpaid --> unpaid : 新尝试失败但不足3次且仍未到期
+    unpaid --> enrolled : 支付成功与出票同事务提交
+    unpaid --> cancelled : 3次失败、到期、合法取消或活动终止
+    enrolled --> enrolled : 退款失败则全部回滚，保存重试依据
+    enrolled --> checkedIn : 授权窗口内验有效票
+    enrolled --> refunded : 合规主动退款或平台终止退款成功
+    enrolled --> absent : 场次正常结束且仍未签到
+    checkedIn --> completed : 正常结束或平台提前终止结算
+    cancelled --> [*]
+    refunded --> [*]
+    absent --> [*]
+    completed --> [*]

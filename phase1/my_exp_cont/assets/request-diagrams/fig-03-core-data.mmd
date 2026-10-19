@@ -1,0 +1,12 @@
+flowchart TD
+    organizer["活动组织者"] -->|"创建"| activity["活动"]
+    activity -->|"包含多个"| activitySession["场次"]
+    activitySession -->|"设置多个"| ticketType["票种"]
+    participant["参与者"] -->|"提交"| registrationOrder["报名单"]
+    registrationOrder -->|"对应一个场次"| activitySession
+    registrationOrder -->|"选择该场次的一个票种"| ticketType
+    registrationOrder -->|"可发起多次尝试，最多一次成功"| paymentAttempt["支付尝试记录"]
+    registrationOrder -->|"支付成功后生成一张"| electronicTicket["电子票"]
+    registrationOrder -->|"退款成功后记录，最多一次"| successfulRefund["成功退款记录"]
+    electronicTicket -->|"验票成功后记录，最多一次"| checkInRecord["签到记录"]
+    ticketChecker["检票人员"] -->|"仅核验授权场次的票"| checkInRecord

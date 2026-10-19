@@ -1,0 +1,20 @@
+stateDiagram-v2
+    direction TB
+    state "草稿" as draft
+    state "待审核" as pendingReview
+    state "已发布" as published
+    state "已取消" as cancelled
+    state "已下架" as removed
+    state "已结束" as finished
+
+    [*] --> draft : 组织者创建
+    draft --> pendingReview : 提交校验通过
+    pendingReview --> draft : 撤回或填写原因退回
+    pendingReview --> published : 管理员审核及发布校验通过
+    published --> published : 允许范围内编辑，不改变活动状态
+    published --> cancelled : 早于首场开始且全活动无签到
+    published --> removed : 管理员具有违规依据
+    published --> finished : 全部场次自然结束
+    cancelled --> [*]
+    removed --> [*]
+    finished --> [*]

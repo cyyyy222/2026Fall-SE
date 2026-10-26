@@ -1,0 +1,198 @@
+[
+  {
+    "id": "01",
+    "name": "登录与人工找回",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "02",
+    "name": "注册账号",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "03",
+    "name": "发现活动",
+    "width": 1440,
+    "height": 1128,
+    "issues": []
+  },
+  {
+    "id": "04",
+    "name": "活动详情与本人报名",
+    "width": 1440,
+    "height": 1053,
+    "issues": []
+  },
+  {
+    "id": "05",
+    "name": "订单支付",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "06",
+    "name": "报名成功与电子票",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "07",
+    "name": "我的订单与退款",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "08",
+    "name": "候补与递补确认",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "09",
+    "name": "站内消息",
+    "width": 1440,
+    "height": 1084.5,
+    "issues": []
+  },
+  {
+    "id": "10",
+    "name": "个人中心与账号安全",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "11",
+    "name": "活动举报与处理进度",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "12",
+    "name": "活动工作台",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "13",
+    "name": "草稿与场次票种编辑",
+    "width": 1440,
+    "height": 1238.5,
+    "issues": []
+  },
+  {
+    "id": "14",
+    "name": "已发布活动管理",
+    "width": 1440,
+    "height": 1127,
+    "issues": []
+  },
+  {
+    "id": "15",
+    "name": "活动名单与CSV导出",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "16",
+    "name": "统计与实时计数",
+    "width": 1440,
+    "height": 1050.5,
+    "issues": []
+  },
+  {
+    "id": "17",
+    "name": "授权场次票id核对",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "18",
+    "name": "签到结果与结束补漏",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "19",
+    "name": "活动审核发布",
+    "width": 1440,
+    "height": 1069.5,
+    "issues": []
+  },
+  {
+    "id": "20",
+    "name": "账号与检票授权",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "21",
+    "name": "活动类别管理",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "22",
+    "name": "举报核查与违规下架",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "23",
+    "name": "违规与报名限制",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "24",
+    "name": "操作日志与单条审计",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "25",
+    "name": "支付记录与退款重试",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "26",
+    "name": "终止结算与数据期限",
+    "width": 1440,
+    "height": 1161.5,
+    "issues": []
+  },
+  {
+    "id": "27",
+    "name": "边界与异常反馈",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  },
+  {
+    "id": "28",
+    "name": "人工找回与首次改密",
+    "width": 1440,
+    "height": 1040,
+    "issues": []
+  }
+]

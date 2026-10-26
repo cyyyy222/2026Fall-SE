@@ -1,0 +1,70 @@
+@startuml
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 15
+skinparam shadowing false
+skinparam dpi 140
+hide footbox
+title 时序图（一）：报名占位、候补与模拟支付
+actor "参与者" as U
+boundary "界面/API" as API
+control "账号与权限" as Auth
+control "报名服务" as Order
+control "模拟支付服务" as Pay
+database "SQLite（含日志/消息）" as DB
+U -> API : 确认本人报名(场次,票种,姓名,requestId)
+API -> Auth : 校验当前会话、参与者及本人身份
+Auth --> API : 通过（否则拒绝，不进入业务）
+API -> Order : register(currentUser, payload)
+Order -> DB : BEGIN IMMEDIATE；查本人+requestId
+alt 已受理的相同请求
+  DB --> Order : 原参数指纹、原订单及当前状态
+  Order -> DB : 结束只读分支事务
+  Order --> API : 参数相同返回原结果；不一致拒绝
+else 新请求
+  Order -> DB : 查最新活动/窗口/停售/用户限制\n同场有效唯一、跨场冲突、库存和合格在先候补
+  alt 资格或时间等校验失败
+    Order -> DB : ROLLBACK；独立记录可识别失败日志
+    Order --> API : 返回失败原因，不入候补
+  else 校验通过
+    alt 有可分配名额且无合格在先候补
+      Order -> DB : 建未支付单并占位；payDeadline=min(now+15分,截止)
+    else 无可分配名额或须排队
+      Order -> DB : 建候补中单，不占位\n按受理时间+订单id稳定排序
+    end
+    Order -> DB : 写成功日志；COMMIT
+    Order --> API : 返回订单、状态和时限
+  end
+end
+API --> U : 展示结果（候补不算支付或出票成功）
+opt 本人订单已处于未支付（普通有票或递补确认后）
+  U -> API : 确认模拟支付(orderId, attemptId)
+  API -> Auth : 重新鉴权、本人订单归属
+  API -> Pay : pay(orderId, attemptId)
+  Pay -> DB : BEGIN IMMEDIATE；查历史尝试/成功支付
+  alt 已受理尝试或已有成功支付
+    Pay -> DB : 读取原结果和当前状态；结束事务
+    Pay --> API : 返回原结果，不重复出票或累计失败
+  else 新尝试
+    Pay -> DB : 重查活动未终止、订单未支付、now<支付/报名截止
+    alt 状态或时间失效
+      Pay -> DB : ROLLBACK；独立失败日志
+      Pay --> API : 拒绝；超时清理由持久任务处理
+    else 模拟支付成功（普通环境默认，含0元）
+      Pay -> DB : 记录成功支付；生成唯一票；订单已报名\n写成功日志与必发消息（全部同事务）
+      note right of DB : 支付沿用原占位，不再扣名额。\n任何写入失败均ROLLBACK，不能有支付无票。
+      Pay -> DB : COMMIT
+      Pay --> API : 成功及票id
+    else 演示/测试环境指定失败
+      Pay -> DB : 记录新失败尝试并累计连续次数\n第3次则取消、释放、日志和必发消息同事务
+      Pay -> DB : COMMIT（未达3次则仍未支付，期限不续）
+      Pay --> API : 失败结果与当前订单状态
+    end
+  end
+  API --> U : 展示结果；响应丢失按原编号查询
+end
+legend bottom
+  交互性图；REQ-009～016、024、039～040、044～046、051。
+  图示正常数据库可写场景；任一事务异常回滚，失败日志独立尝试写入。
+endlegend
+@enduml
+

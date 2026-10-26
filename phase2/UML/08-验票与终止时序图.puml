@@ -1,0 +1,71 @@
+@startuml
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 15
+skinparam shadowing false
+skinparam dpi 140
+hide footbox
+title 时序图（二）：票id验票与活动终止竞争
+actor "检票人员" as C
+boundary "验票界面/API" as API
+control "验票服务" as Check
+database "SQLite（含日志/消息/待办）" as DB
+control "活动管理服务" as Event
+control "持久任务执行器" as Job
+C -> API : 输入票id并请求核对
+API -> Check : preview(currentChecker, ticketId)
+Check -> DB : 校验会话/账号可用、票存在、当前场次授权
+alt 无权或账号已失效
+  Check --> API : 拒绝，不展示姓名（可识别失败独立日志）
+else 已授权
+  alt 已有首次签到
+    Check --> API : 返回已签到及首次时间（不产生新签到）
+  else 尚未签到
+    Check -> DB : 校验活动未终止、票有效、处于验票窗口
+    Check --> API : 通过才展示姓名/场次/票种；否则给出原因
+  end
+end
+API --> C : 展示核对结果
+opt 可确认的新验票
+  C -> API : 确认验票(ticketId)
+  API -> Check : confirm(currentChecker, ticketId)
+  Check -> DB : BEGIN IMMEDIATE；重新校验会话/账号/授权
+  alt 账号/授权失效
+    Check -> DB : ROLLBACK；独立失败日志
+    Check --> API : 拒绝（核对成功不代表确认时仍有权）
+  else 当前仍有权限
+    Check -> DB : 读取票、首次签到、活动与场次最新状态
+    alt 已有签到
+      Check -> DB : 读取首次结果；结束事务
+      Check --> API : 返回原结果，过窗口也不再签到
+    else 活动终止／非有效票／窗口外
+      Check -> DB : ROLLBACK；独立失败日志
+      Check --> API : 拒绝新验票
+    else 条件均满足
+      Check -> DB : 插入唯一签到；票改已验票；订单已签到\n写成功日志；COMMIT
+      Check --> API : 首次验票成功
+    end
+  end
+  API --> C : 展示结果
+end
+== 与验票竞争的独立终止操作（可在上述任意时点到达） ==
+Event -> DB : BEGIN IMMEDIATE；鉴权/归属/原因/当前状态复核
+alt 组织者取消且首场已开始或已有签到
+  Event -> DB : ROLLBACK；独立失败日志
+else 合法取消／有依据管理员下架
+  Event -> DB : 活动终止+生效时刻+逐单事实依据/持久待办\n日志同事务；检票授权即时停用；COMMIT
+  note right of DB
+    SQLite写事务串行：取消先提交，新验票拒绝；
+    首次签到先提交，组织者取消拒绝；管理员仍可据证下架。
+  end note
+  Job -> DB : 读取未完成终止待办（重启后续办）
+  loop 每一待办，按终止时事实幂等处理
+    Job -> DB : 单项事务：未支付类取消；未结束场次未签到成功单退款\n已签到完成；旧终态不回改；日志/必发消息/进度一起提交
+  end
+  Job -> DB : 全部结清后生成终止统计，5分钟内完成
+end
+legend bottom
+  交互性图；REQ-017～018、022、025～027、031、038、044～046、051。
+  验票窗口=[场次开始前30分钟,场次结束)；票id核对+确认，不使用二维码。
+  重复验票先查账号和授权，已销毁账号不能通过原签到结果绕过鉴权。
+endlegend
+@enduml

@@ -1,0 +1,42 @@
+@startuml
+!pragma layout smetana
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 15
+skinparam shadowing false
+skinparam dpi 160
+title 状态图（一）：活动生命周期
+state "草稿" as Draft
+state "待审核" as Pending
+state "已发布" as Published
+state "已取消" as Cancelled
+state "已下架" as Removed
+state "已结束" as Ended
+[*] --> Draft : 组织者创建
+Draft --> Pending : 提交 [完整性／类别／排期／时间校验通过]
+Pending --> Draft : 组织者撤回／管理员驳回并记原因
+Pending --> Draft : 发布条件失效／额度满／组织者受限\n记录原因退回
+Pending --> Published : 管理员通过 [发布复核通过]\n同事务发布、占每日额度、日志与通知
+Published --> Published : 合法字段编辑 [容量不低于占用]\n扩容触发候补优先；地点/容量变更通知
+Published --> Cancelled : 组织者取消 [首场开始前且全活动无签到]
+Published --> Removed : 管理员下架 [有明确违规依据]
+Published --> Ended : 最晚场次自然结束
+Cancelled --> [*]
+Removed --> [*]
+Ended --> [*]
+note bottom of Published
+  发布复核：有效类别、放票/排期、组织者限制、每日100额度、
+  每场至少1个可用检票账号；通过即发布，无“通过待发布”态。
+  24小时超审核时限只提示待办，不能自动发布。
+  开售、停售、售罄、截止均非活动持久状态。
+end note
+note bottom of Removed
+  终止提交即时拒绝新报名、支付、递补、验票。
+  终止状态与待办依据持久化；逐单结算及报表5分钟内完成。
+  已签到转完成；未结束场次未签到成功订单全退；旧终态不回改。
+  三个活动终态均不互转、不恢复；草稿注销逻辑删除另记删除字段。
+end note
+legend bottom
+  行为性图；REQ-004～006、022、026、031、033～038、042、045、051。
+endlegend
+@enduml
+

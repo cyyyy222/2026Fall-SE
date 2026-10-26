@@ -1,0 +1,71 @@
+@startuml
+!pragma layout smetana
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 15
+skinparam shadowing false
+skinparam componentStyle uml2
+skinparam dpi 160
+title 组件图：活动票务与报名系统模块与交互
+top to bottom direction
+component "角色界面\n参与者／组织者／检票员／管理员" as UI
+package "单应用（模块化单体，设计选择）" {
+  component "接口层\n参数校验／统一错误与结果查询" as API
+  component "账号与权限\n单角色／会话／归属／场次授权" as Auth
+  component "活动管理\n类别／草稿／审核发布／有限编辑" as Event
+  component "公开查询\nAND筛选／稳定排序／分页／详情" as Search
+  component "报名与候补\n唯一性／排期／占位／递补" as Order
+  component "模拟支付退款\n支付尝试／出票／退款依据" as Pay
+  component "电子票与验票\n票id／核对确认／签到／文本票" as Check
+  component "统计与名单\n实时计数／结束快照／CSV" as Stats
+  component "举报与限制\n人工核查／事实去重／手机号计数" as Gov
+  component "持久任务\n超时／终止结算／清理／重启续办" as Job
+  component "事务与持久化\nRepository／UnitOfWork／幂等约束" as Store
+  component "审计与站内消息\n成功日志／事件+接收人去重" as Notice
+}
+database "本地 SQLite\n业务数据／任务进度／日志／消息" as DB
+folder "本地受控文件\n海报／短期CSV" as Files
+UI --> API
+API --> Auth : 所有非公开请求先鉴权
+API --> Search
+API --> Event
+API --> Order
+API --> Pay
+API --> Check
+API --> Stats
+API --> Gov
+Order --> Pay : 本人订单支付／退款
+Order --> Event : 当前状态及售票窗口
+Check --> Event : 终止状态与窗口
+Gov --> Event : 有依据下架
+Event --> Job : 同事务保存终止依据与待办
+Job --> Order : 清理／公平递补
+Job --> Pay : 有依据逐单退款
+Job --> Check : 结束结算
+Job --> Stats : 结算完成才生成快照
+Auth --> Store
+Search --> Store
+Event --> Store
+Order --> Store
+Pay --> Store
+Check --> Store
+Stats --> Store
+Gov --> Store
+Job --> Store
+Notice --> Store
+Store --> DB
+Store ..> Notice : 业务事务内调用
+Stats --> Files : 临时文件成功后才发布
+Event --> Files : 校验海报
+note bottom of Store
+  单项业务、成功日志、必发消息同事务提交；失败全部回滚。
+  可识别失败日志在回滚后独立保存，数据库不可用不伪称已记录。
+  写事务串行化（SQLite BEGIN IMMEDIATE）+唯一约束是设计选择。
+  公开查询只读；文件下载再次校验权限和7天期限。
+end note
+legend bottom
+  结构性图；REQ-001～REQ-053 的模块归属见 README。
+  箭头表示调用或数据访问依赖，模块不代表独立部署服务。
+  无真实支付、外部通知、二维码或分布式服务。
+endlegend
+@enduml
+

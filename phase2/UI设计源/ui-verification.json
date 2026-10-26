@@ -1,0 +1,207 @@
+{
+  "screens": 28,
+  "prototypeChecks": [
+    "本人报名 → 独立支付页",
+    "用户点击确认模拟支付 → 电子票页"
+  ],
+  "fontFamily": "\"Noto Sans SC\", \"Microsoft YaHei\", sans-serif",
+  "scope": "Static design navigation only, no business backend",
+  "files": [
+    {
+      "id": "01",
+      "file": "01-登录与人工找回.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 81560
+    },
+    {
+      "id": "02",
+      "file": "02-注册账号.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 71191
+    },
+    {
+      "id": "03",
+      "file": "03-发现活动.png",
+      "width": 1440,
+      "height": 1128,
+      "bytes": 115117
+    },
+    {
+      "id": "04",
+      "file": "04-活动详情与本人报名.png",
+      "width": 1440,
+      "height": 1053,
+      "bytes": 128330
+    },
+    {
+      "id": "05",
+      "file": "05-订单支付.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 98294
+    },
+    {
+      "id": "06",
+      "file": "06-报名成功与电子票.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 102607
+    },
+    {
+      "id": "07",
+      "file": "07-我的订单与退款.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 107169
+    },
+    {
+      "id": "08",
+      "file": "08-候补与递补确认.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 101002
+    },
+    {
+      "id": "09",
+      "file": "09-站内消息.png",
+      "width": 1440,
+      "height": 1085,
+      "bytes": 101288
+    },
+    {
+      "id": "10",
+      "file": "10-个人中心与账号安全.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 102730
+    },
+    {
+      "id": "11",
+      "file": "11-活动举报与处理进度.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 96273
+    },
+    {
+      "id": "12",
+      "file": "12-活动工作台.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 102024
+    },
+    {
+      "id": "13",
+      "file": "13-草稿与场次票种编辑.png",
+      "width": 1440,
+      "height": 1239,
+      "bytes": 129259
+    },
+    {
+      "id": "14",
+      "file": "14-已发布活动管理.png",
+      "width": 1440,
+      "height": 1127,
+      "bytes": 124161
+    },
+    {
+      "id": "15",
+      "file": "15-活动名单与CSV导出.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 112146
+    },
+    {
+      "id": "16",
+      "file": "16-统计与实时计数.png",
+      "width": 1440,
+      "height": 1051,
+      "bytes": 124838
+    },
+    {
+      "id": "17",
+      "file": "17-授权场次票id核对.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 92480
+    },
+    {
+      "id": "18",
+      "file": "18-签到结果与结束补漏.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 110788
+    },
+    {
+      "id": "19",
+      "file": "19-活动审核发布.png",
+      "width": 1440,
+      "height": 1070,
+      "bytes": 131428
+    },
+    {
+      "id": "20",
+      "file": "20-账号与检票授权.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 124785
+    },
+    {
+      "id": "21",
+      "file": "21-活动类别管理.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 101717
+    },
+    {
+      "id": "22",
+      "file": "22-举报核查与违规下架.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 115756
+    },
+    {
+      "id": "23",
+      "file": "23-违规与报名限制.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 123700
+    },
+    {
+      "id": "24",
+      "file": "24-操作日志与单条审计.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 127750
+    },
+    {
+      "id": "25",
+      "file": "25-支付记录与退款重试.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 124646
+    },
+    {
+      "id": "26",
+      "file": "26-终止结算与数据期限.png",
+      "width": 1440,
+      "height": 1162,
+      "bytes": 155815
+    },
+    {
+      "id": "27",
+      "file": "27-边界与异常反馈.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 100022
+    },
+    {
+      "id": "28",
+      "file": "28-人工找回与首次改密.png",
+      "width": 1440,
+      "height": 1040,
+      "bytes": 94092
+    }
+  ]
+}

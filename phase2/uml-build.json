@@ -1,0 +1,62 @@
+﻿{
+    "GeneratedAt":  "2026-10-26T04:47:43.0825952+00:00",
+    "PlantUmlJarSHA256":  "4A01EA09B317180FB8E7EEF712DFDCA725409D2EE1919E4B5ADFE9D8362B6FE5",
+    "Files":  [
+                  {
+                      "Source":  "01-组件图.puml",
+                      "PNG":  "01-组件图.png",
+                      "Width":  2978,
+                      "Height":  2234,
+                      "SourceSHA256":  "096DA14A793820C0961E59E54BB1F5B29B94EBC5EF5BEA6ADF4E5008B9E289D8"
+                  },
+                  {
+                      "Source":  "02-核心领域类图.puml",
+                      "PNG":  "02-核心领域类图.png",
+                      "Width":  2059,
+                      "Height":  2535,
+                      "SourceSHA256":  "118618D17CDBE4F6B387C16E4FA0D9AEABF535B9E59D5E7C3817358996C0D2C3"
+                  },
+                  {
+                      "Source":  "03-支撑领域类图.puml",
+                      "PNG":  "03-支撑领域类图.png",
+                      "Width":  3454,
+                      "Height":  1577,
+                      "SourceSHA256":  "194BFD4DDFD2AED992BC9C2D91D18F9F6F8459EAEA74A558652B2339F204FD51"
+                  },
+                  {
+                      "Source":  "04-用例图.puml",
+                      "PNG":  "04-用例图.png",
+                      "Width":  900,
+                      "Height":  2208,
+                      "SourceSHA256":  "BAE83464AE0AAB0C31B0D35078556132ACA0940A4AC05713D7791D637602DD53"
+                  },
+                  {
+                      "Source":  "05-活动状态图.puml",
+                      "PNG":  "05-活动状态图.png",
+                      "Width":  1895,
+                      "Height":  1283,
+                      "SourceSHA256":  "3B3A2D56E188514B3F3EC46A4F7A7E29C2293B1EE929415AF0954AE9A2DF2964"
+                  },
+                  {
+                      "Source":  "06-订单状态图.puml",
+                      "PNG":  "06-订单状态图.png",
+                      "Width":  2448,
+                      "Height":  1748,
+                      "SourceSHA256":  "6766C485B2820FCDC69F3A8186F43274B91AE4CA2DA905D8AB417878D3A9F9A5"
+                  },
+                  {
+                      "Source":  "07-报名支付时序图.puml",
+                      "PNG":  "07-报名支付时序图.png",
+                      "Width":  2204,
+                      "Height":  2636,
+                      "SourceSHA256":  "51E3BA0A9012B5C5E6ED787556FF5DBAA7B1621710C656B4FCECAC0C575DA120"
+                  },
+                  {
+                      "Source":  "08-验票与终止时序图.puml",
+                      "PNG":  "08-验票与终止时序图.png",
+                      "Width":  2092,
+                      "Height":  2517,
+                      "SourceSHA256":  "9DCF5E4214BD8C7C5D7D3583E1225F9531C5FEB84FAA4D254712B51B4F77AA89"
+                  }
+              ]
+}

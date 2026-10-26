@@ -1,0 +1,12 @@
+const fs=require('fs'),path=require('path'),{pathToFileURL}=require('url');
+const {chromium}=require(path.join(process.env.UI_NODE_MODULES||'C:/Users/20431/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules','playwright'));
+(async()=>{const browser=await chromium.launch({headless:true,executablePath:process.env.UI_BROWSER||'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});const p=await browser.newPage({viewport:{width:1600,height:1200}});
+ await p.goto(pathToFileURL(path.join(__dirname,'index.html')).href+'?screen=04');await p.waitForFunction(()=>window.designReady);
+ const sourceFont=await p.getByText('账号手机号 · 只读',{exact:true}).evaluate(n=>getComputedStyle(n).fontFamily);
+ await p.getByText('确认报名',{exact:true}).click();await p.waitForFunction(()=>window.designReady);if(!p.url().endsWith('screen=05'))throw Error('Booking did not navigate to payment');
+ if(!await p.getByText('确认模拟支付',{exact:true}).isVisible())throw Error('User payment control missing');
+ await p.getByText('确认模拟支付',{exact:true}).click();await p.waitForFunction(()=>window.designReady);if(!p.url().endsWith('screen=06'))throw Error('Payment did not navigate to ticket');
+ const screens=JSON.parse(fs.readFileSync(path.join(__dirname,'screens.json'),'utf8'));const files=screens.map(s=>{const f=path.join(__dirname,'../UI界面',s.id+'-'+s.title+'.png');const b=fs.readFileSync(f);if(b.subarray(0,8).toString('hex')!=='89504e470d0a1a0a')throw Error('Invalid PNG '+f);return{id:s.id,file:path.basename(f),width:b.readUInt32BE(16),height:b.readUInt32BE(20),bytes:b.length};});
+ const result={screens:files.length,prototypeChecks:['本人报名 → 独立支付页','用户点击确认模拟支付 → 电子票页'],fontFamily:sourceFont,scope:'Static design navigation only, no business backend',files};fs.writeFileSync(path.join(__dirname,'ui-verification.json'),JSON.stringify(result,null,2));
+ await p.goto(pathToFileURL(path.join(__dirname,'../UI界面/界面索引.html')).href);await p.locator('img').last().waitFor();await p.evaluate(()=>Promise.all([...document.images].map(i=>i.decode())));await p.screenshot({path:path.join(__dirname,'../UI界面/00-界面总览.png'),fullPage:true});
+ console.log('Verified '+files.length+' PNG files and 2 prototype transitions. Font: '+sourceFont);await browser.close();})().catch(e=>{console.error(e);process.exitCode=1;});

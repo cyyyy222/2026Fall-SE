@@ -1,0 +1,139 @@
+@startuml
+!pragma layout smetana
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 14
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam dpi 160
+hide empty members
+title 类图（一）：核心票务领域
+class "账号 User" as User {
+  +id: UUID
+  +role: Role（固定四选一）
+  +phoneIdentityId: UUID [0..1]
+  +passwordHash: String
+  +deletedAt: DateTime [0..1]
+}
+class "活动 Event" as Event {
+  +id: UUID
+  +status: EventStatus
+  +categoryNameSnapshot: String
+  +publishedAt: DateTime [0..1]
+  +terminatedAt: DateTime [0..1]
+  +submit()
+  +publish()
+  +terminate(reason)
+}
+class "类别 Category" as Category {
+  +id: UUID
+  +name: String
+  +enabled: Boolean
+}
+class "场次 EventSession" as Session {
+  +id: UUID
+  +name: String
+  +startsAt, endsAt: DateTime
+  +salesOpensAt, registrationClosesAt: DateTime
+  +location: String
+  +capacity: Integer
+}
+class "票种 TicketType" as Type {
+  +id: UUID
+  +name: String
+  +capacity: Integer
+  +priceJiao: Integer
+  +saleStopped: Boolean
+  +/occupied, /remaining: Integer
+}
+class "报名单 RegistrationOrder" as Order {
+  +id, requestId: UUID
+  +requestFingerprint: String
+  +status: OrderStatus
+  +nameSnapshot: String
+  +amountJiaoSnapshot: Integer
+  +createdAt: DateTime
+  +confirmDeadline, payDeadline: DateTime [0..1]
+  +consecutiveFailures: Integer
+  +confirmPromotion()
+  +cancel()
+}
+class "支付尝试 PaymentAttempt" as Payment {
+  +id, attemptId: UUID
+  +result: Success | Failure
+  +amountJiao: Integer
+  +createdAt: DateTime
+  +failureReason: String [0..1]
+}
+class "退款依据 RefundRequest" as Request {
+  +id: UUID
+  +source: User | PlatformTermination
+  +acceptedAt: DateTime
+  +eligibilitySnapshot: String
+  +revokedAt: DateTime [0..1]
+}
+class "退款尝试 RefundAttempt" as Refund {
+  +id: UUID
+  +result: Success | Failure
+  +amountJiao: Integer
+  +createdAt: DateTime
+  +failureReason: String [0..1]
+}
+class "电子票 Ticket" as Ticket {
+  +id: UUID（全局唯一）
+  +status: Valid | Checked | Invalid
+  +downloadText()
+}
+class "签到 CheckIn" as CheckIn {
+  +id: UUID
+  +checkedAt: DateTime
+  +checkerId: UUID
+  +sessionIdSnapshot: UUID
+}
+class "当前检票授权 CheckerAssignment" as Grant {
+  +id: UUID
+  +assignedAt: DateTime
+}
+User "1" -- "0..*" Event : 组织者创建 >
+Category "0..1" -- "0..*" Event
+Event "1" *-- "0..20" Session
+Session "1" *-- "0..10" Type
+User "1" -- "0..*" Order : 参与者本人 >
+Session "1" -- "0..*" Order
+Type "1" -- "0..*" Order
+Order "1" -- "0..*" Payment
+Order "1" -- "0..*" Request
+Request "1" -- "0..*" Refund
+Payment "1" -- "0..*" Refund : 原成功支付 >
+Order "1" -- "0..1" Ticket
+Ticket "1" -- "0..1" CheckIn
+User "1" -- "0..1" Grant : 检票员 >
+Session "1" -- "0..*" Grant
+User "1" -- "0..*" CheckIn : 历史执行者 >
+note bottom of Order
+  有效订单：候补中、递补待确认、未支付、已报名、已签到。
+  用户+场次最多1有效订单；跨场有效订单时间不得重叠。
+  用户+报名requestId唯一，参数变化拒绝；重报用新编号。
+  每单最多1成功支付、1成功退款、1票、1签到。
+  候补直接复用报名单，不再创建另一套候补状态实体。
+end note
+note bottom of Type
+  已占=未支付+递补待确认+成功出票且未退款（含完成/缺席）。
+  剩余=容量-已占>=0；支付和递补确认不重复扣库存。
+  票种必须属于订单场次；容量和剩余不是独立人工维护值。
+end note
+note top of Event
+  草稿可含0场/0票种；提交后活动1～20场、每场1～10票种。
+  草稿可未选类别，提交必须关联1个有效类别。
+  各票种容量之和<=场次容量。组合关系不代表物理级联删除。
+  一个账号固定一个角色，以关联端约束角色而非继承多种身份。
+end note
+note bottom of Grant
+  当前最多授权一场；改绑不改历史签到归属。
+  已发布未终止场次至少1个可用检票账号。
+end note
+legend bottom
+  结构性图；REQ-001、004～005、009～018、028、031、034～040、044～045。
+  UUID、类名、方法和数据库约束实现方式为设计选择。
+endlegend
+@enduml
+

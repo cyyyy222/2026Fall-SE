@@ -1,0 +1,73 @@
+@startuml
+!pragma layout smetana
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 15
+skinparam shadowing false
+skinparam dpi 160
+left to right direction
+title 用例图：四类角色及业务权限
+actor "未登录访客" as Guest
+actor "参与者" as Participant
+actor "活动组织者" as Organizer
+actor "检票人员" as Checker
+actor "平台管理员" as Admin
+rectangle "活动票务与报名系统" {
+  usecase "查询公开场次与详情" as Search
+  usecase "注册参与者／组织者" as Register
+  usecase "登录／改密／退出\n申请人工找回" as Account
+  usecase "本人消息与已读标记" as Message
+  usecase "本人账号注销" as Delete
+  usecase "报名／候补／递补确认" as Book
+  usecase "本人模拟支付／取消退款" as Pay
+  usecase "本人历史订单与文本票" as Ticket
+  usecase "提交举报／查看本人进度" as Report
+  usecase "本人活动草稿、场次票种\n提交／撤回／有限编辑／合法取消" as Manage
+  usecase "按权限查看名单与计数\n正式统计受结算及保留期限制" as Stats
+  usecase "按权限导出CSV" as Export
+  usecase "票id核对及确认验票\n查首次签到／结束后补漏标缺席" as Check
+  usecase "审核发布／驳回\n类别、账号及检票授权管理" as Review
+  usecase "核查举报／据证下架\n违规限制／人工核验重置密码" as Gov
+  usecase "查询操作日志及单条对象审计\n查看支付记录／有依据重试退款" as Audit
+}
+Guest --> Search
+Guest --> Register
+Guest --> Account
+Participant --> Search
+Participant --> Account
+Participant --> Message
+Participant --> Delete
+Participant --> Book
+Participant --> Pay
+Participant --> Ticket
+Participant --> Report
+Organizer --> Account
+Organizer --> Search
+Organizer --> Message
+Organizer --> Delete
+Organizer --> Manage
+Organizer --> Stats
+Organizer --> Export
+Checker --> Account
+Checker --> Message
+Checker --> Check
+Checker --> Stats
+Admin --> Account
+Admin --> Message
+Admin --> Review
+Admin --> Gov
+Admin --> Audit
+Admin --> Stats
+Admin --> Export
+note bottom of Stats
+  组织者限自己活动，检票员限当前授权场次名单/签到统计。
+  检票员不能导出；参与者不能读取整份名单。
+  管理员也不能在活动终结7天后重建短期名单或统计。
+end note
+legend bottom
+  行为性图；四角色互不继承，一账号固定一种角色。
+  公共读取可匿名；非公开用例服务端校验会话、角色和对象归属。
+  自动递补、超时清理和结算属于内部任务，不虚构外部“系统”角色。
+  覆盖功能模块：REQ-001～022、028～043、048～053。
+endlegend
+@enduml
+

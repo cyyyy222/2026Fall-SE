@@ -1,0 +1,51 @@
+@startuml
+!pragma layout smetana
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 15
+skinparam shadowing false
+skinparam dpi 160
+title 状态图（二）：报名单稳定状态（附录A）
+state "候补中" as Waiting
+state "递补待确认" as Offered
+state "未支付" as Unpaid
+state "已报名" as Registered
+state "已签到" as Checked
+state "已完成" as Completed
+state "已取消" as Cancelled
+state "已退款" as Refunded
+state "缺席" as Absent
+[*] --> Waiting : 新报名 [资格通过且须排队]\n不占位
+[*] --> Unpaid : 新报名 [有可分配名额且无合格在先候补]\n创建并占位
+Waiting --> Offered : 自动递补 [开放且未停售且本人合格]\n占位+通知同事务
+Waiting --> Cancelled : 主动放弃／报名截止／活动终止
+Offered --> Unpaid : 本人按期确认\n沿用原占位并起算支付期
+Offered --> Cancelled : 拒绝／确认超时／主动取消／截止／终止\n释放一次占位
+Unpaid --> Registered : 支付成功+出票+日志+消息同事务\n不重复扣库存（免费票也须确认）
+Unpaid --> Unpaid : 新尝试失败 [连续失败不足3次且未超时]\n同一尝试重放不累计
+Unpaid --> Cancelled : 第3次不同尝试连续失败／超时\n或主动取消／截止／终止；释放一次
+Registered --> Checked : 有效授权+有效票+验票窗口内确认
+Registered --> Refunded : 合规主动退款／有依据平台终止退款\n成功后票失效+释放一次
+Registered --> Registered : 退款失败：回滚票与占位\n保留合法申请供重试
+Registered --> Absent : 正常结束仍未签到\n未用票失效，历史售票仍计占用
+Checked --> Completed : 正常结束／平台提前终止结算\n票保留已验票
+Completed --> [*]
+Cancelled --> [*]
+Refunded --> [*]
+Absent --> [*]
+note bottom of Offered
+  确认截止=min(通知持久化时刻+12小时, 报名截止)。
+  支付截止=min(普通创建/递补确认时刻+15分钟, 报名截止)。
+  所有窗口含起点不含终点；截止即时拒绝，清理最长1分钟。
+end note
+note bottom of Registered
+  “已支付”仅支付出票事务内中间步骤，不独立提交。
+  “已递补”是操作标签；票状态独立为有效/已验票/已失效。
+  已报名不能直转已取消；已签到不允许退款/取消/缺席。
+  下架退款依据终止时事实，已结束订单不回改；不新增平台中止缺席。
+  终态不可恢复；旧请求返回原单，新报名意图创建新单。
+end note
+legend bottom
+  行为性图；REQ-009～018、022、026、039～040、043～046、051；需求附录A。
+endlegend
+@enduml
+

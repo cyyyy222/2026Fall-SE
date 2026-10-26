@@ -1,0 +1,123 @@
+@startuml
+!pragma layout smetana
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 14
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam dpi 160
+hide empty members
+title 类图（二）：治理、任务、消息与统计（延续核心类图）
+class "账号 User" as User
+class "活动 Event" as Event
+class "场次 EventSession" as Session
+class "报名单 RegistrationOrder" as Order
+class "手机号身份 PhoneIdentity" as Phone {
+  +id, normalizedPhone: String
+  +cancellationCount: Integer
+  +lastCancelledAt: DateTime [0..1]
+  +registrationBlacklisted: Boolean
+}
+class "登录会话 LoginSession" as Login {
+  +id: UUID
+  +tokenHash: String
+  +expiresAt: DateTime
+  +revokedAt: DateTime [0..1]
+}
+class "举报 Report" as Report {
+  +id: UUID
+  +reason, evidenceText: String
+  +status, conclusion: String
+}
+class "违规事实 ViolationFact" as Fact {
+  +id, factKey: String
+  +occurredAt: DateTime
+  +evidence: String
+}
+class "业务限制 BusinessRestriction" as Restriction {
+  +id: UUID
+  +kind: Publish | Register
+  +startsAt, endsAt: DateTime
+}
+class "限制依据 RestrictionBasis" as Basis {
+  +factId: UUID
+  +restrictionKind: String
+}
+class "站内消息 InboxMessage" as Message {
+  +eventKey: String
+  +createdAt, expiresAt: DateTime
+  +readAt, deletedAt: DateTime [0..1]
+}
+class "审计记录 AuditLog" as Log {
+  +actorId: UUID [0..1]
+  +actorRole: Role | SYSTEM
+  +objectType, objectId: String
+  +action, result, failureReason: String
+  +createdAt: DateTime
+}
+class "持久任务 PersistentJob" as Job {
+  +id: UUID
+  +type, status: String
+  +dueAt, deadlineAt: DateTime
+  +progressCursor: String
+}
+class "终止逐单待办 TerminationItem" as Item {
+  +effectiveAt: DateTime
+  +eligibilitySnapshot: String
+  +status, retryCount: Integer
+}
+class "统计快照 StatisticsSnapshot" as Stats {
+  +scope: Session | Event
+  +countsAndDenominators: String
+  +reason: Natural | Cancel | Takedown
+  +expiresAt: DateTime
+}
+class "导出文件 ExportFile" as Export {
+  +id, ownerId: UUID
+  +path: String
+  +expiresAt: DateTime
+}
+Phone "0..1" -- "0..*" User : 跨注销重注册关联 >
+User "1" -- "0..*" Login
+User "1" -- "0..*" Report : 举报人 >
+Session "1" -- "0..*" Report
+Event "1" -- "0..*" Fact
+Phone "1" -- "0..*" Restriction
+Restriction "1" -- "1..*" Basis
+Basis ..> Fact : 组织者违规依据
+Basis ..> Order : 参与者缺席／主动退款依据
+User "1" -- "0..*" Message : 接收人 >
+Event "0..1" -- "0..*" Job
+Job "1" *-- "0..*" Item
+Order "1" -- "0..*" Item
+Event "1" -- "0..*" Stats
+Session "0..1" -- "0..*" Stats : 场次级快照 >
+Event "1" -- "0..*" Export
+Log ..> User : 保存操作人内部编号
+Log ..> Job : SYSTEM含任务类型
+note bottom of Restriction
+  参与者/组织者必须关联手机号身份；管理员/检票员不强制填手机号。
+  购票/发布锁定不等于账号停用；已有占位仍可履约。
+  同活动同事实只处罚一次；同事实不重复触发同类限制。
+  手机号保存注销及限制计数，第三次注销后禁止注册。
+end note
+note bottom of Item
+  终止生效和待办依据同事务保存；逐单事务结算，可恢复重试。
+  使用终止时刻事实，不按任务执行时刻重算退款资格。
+  终止任务5分钟，普通清理/递补/自然结算1分钟。
+end note
+note bottom of Stats
+  场次结算完才生成；活动加总分子分母再计算。
+  实时计数直接查询，不伪造正式快照。
+  名单/快照/导出均至活动实际终结后7天，禁止到期重建。
+end note
+note bottom of Message
+  eventKey+接收人唯一；与业务同事务。
+  消息180天逻辑删除；日志180天物理删除。
+  底层订单/支付/退款/票/签到保留，日志不级联删除。
+end note
+legend bottom
+  结构性图；REQ-019～022、026、028～032、041～043、045～046、048～053。
+  类名和存储拆分为设计选择；图省略字段不代表取消原需求。
+endlegend
+@enduml
+

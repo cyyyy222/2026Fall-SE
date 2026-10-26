@@ -77,7 +77,7 @@ def header_footer(canvas, doc):
     canvas.drawString(MARGIN, height - 10 * mm, '软件设计与建模  /  活动票务与报名系统')
     canvas.setStrokeColor(RULE)
     canvas.line(MARGIN, height - 13 * mm, width - MARGIN, height - 13 * mm)
-    canvas.drawString(MARGIN, 9 * mm, '241220089  蔡杨杨  |  设计报告初稿 v1')
+    canvas.drawString(MARGIN, 9 * mm, '241220089  蔡杨杨  |  设计报告初稿 v2')
     canvas.drawRightString(width - MARGIN, 9 * mm, str(doc.page))
     canvas.restoreState()
 
@@ -86,7 +86,7 @@ class ReportDocument(BaseDocTemplate):
         super().__init__(str(filename), pagesize=A4, leftMargin=MARGIN,
                          rightMargin=MARGIN, topMargin=MARGIN, bottomMargin=MARGIN,
                          title='实验二：软件设计与建模 - 活动票务与报名系统',
-                         author='蔡杨杨', subject='主要功能、UML架构设计、各模块UI及功能说明')
+                         author='蔡杨杨', subject='主要功能、UML架构设计、UI说明及辅助工具交互反思')
         self.bookmark_count = 0
         for name, size in [('Body', A4), ('FigurePortrait', A3), ('FigureLandscape', landscape(A3))]:
             w, h = size
@@ -120,10 +120,10 @@ def switch_layout(target):
 
 def add_heading(s, level, figure=False):
     p = paragraph(s, 'figureheading' if figure else 'h1' if level == 1 else 'h2' if level == 2 else 'h3')
-    # Only the three numbered chapters are top-level outline nodes.
-    if re.match(r'^[123] ', s):
+    # Numbered chapters are top-level outline nodes.
+    if re.match(r'^[1-4] ', s):
         p.outline_title, p.outline_level = s, 0
-    elif re.match(r'^[123]\.\d+ ', s):
+    elif re.match(r'^[1-4]\.\d+ ', s):
         p.outline_title, p.outline_level = s, 1
     story.append(p)
 

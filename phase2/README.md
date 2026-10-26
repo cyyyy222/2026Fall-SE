@@ -2,7 +2,7 @@
 
 项目：活动票务与报名系统。本目录包含 UML、UI 设计和构建材料，以及后续整理的实验报告初稿。
 
-报告初稿：[可编辑 Markdown](实验报告.md) / [PDF](实验报告.pdf)。当前包含软件主要功能、8张 UML 的关系及设计原因、28张 UI 的功能说明，尚未包含辅助工具使用章节。PDF正文采用A4、复杂图页采用A3，图和说明同页；构建脚本为 `report-tools/build_report.py`。
+报告初稿：[可编辑 Markdown](实验报告.md) / [PDF](实验报告.pdf)。当前包含软件主要功能、8张 UML 的关系及设计原因、28张 UI 的功能说明，以及按设计任务整理的辅助工具交互摘要和反思。PDF正文采用A4、复杂图页采用A3，图和说明同页；构建脚本为 `report-tools/build_report.py`。
 
 UI 设计已补充：见 [28张界面索引](UI界面/界面索引.html)、[UI设计清单与交互注记](UI界面/UI设计清单与交互注记.md) 和 [可编辑源与导出说明](UI设计源/README.md)。[Figma设计文件](https://www.figma.com/design/Wb474yxRNd4hICDmyWDkPb)保留28张画板；本地 PNG 使用同源设计脚本导出，原因和限制见源目录说明。
 

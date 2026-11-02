@@ -1,0 +1,11 @@
+# Explicit opt-in MySQL + Redis on this computer. Credentials are never packaged.
+spring:
+  config:
+    import: file:./application-local-private.yml
+app:
+  connections:
+    enabled: true
+  redis:
+    enabled: true
+  jobs:
+    enabled: false

@@ -1,8 +1,8 @@
 # 前后端接口约定
 
-版本：v0.2（需求与冲突复核后，待审阅） · 日期：2026-11-02 · Base URL：`/api`。
+版本：v0.4（业务初版落地，HTTP路径与字段保持） · 日期：2026-11-02 · Base URL：`/api`。
 
-本文是开发契约，接口尚未实现。业务来源见 [项目总纲](project.md) 与 [53条需求追踪](requirements-traceability.md)。接口编号稳定，前端页面、后端模块和验收通过编号引用；JOB-* 是内部操作，不是 HTTP 接口。
+本文是开发契约。当前89项Java业务路由均已接入具体Service用例；本机已连接MySQL/Redis，初始化真实演示数据并将前端切为HTTP，后台任务已获授权启用。真实垂直联调与账号见[HTTP演示说明](http-demo.md)，完整业务与性能验收尚未完成。默认无profile仍离线，依赖存储的请求返回503，不返回原501占位。业务来源见 [项目总纲](project.md) 与 [53条需求追踪](requirements-traceability.md)。接口编号稳定，前端页面、后端模块和验收通过编号引用；JOB-* 是内部操作，不是 HTTP 接口。后端为Java三层+MySQL+Redis；Java落点及默认离线边界见[后端方案](backend-plan.md)和[接口实施表](backend-endpoints.md)；初版实现见[业务交付](backend-implementation.md)。
 
 ## 1. 通用协议
 
@@ -67,6 +67,8 @@ Page<T>：`{items:T[],page:int,pageSize:int,total:int}`。空查询200且items�
 | 对象授权 | currentUser来自会话；请求不可选择操作者；管理员仅具有逐接口列出的能力 |
 
 开发时Vite代理 `/api` 到Java，交付同源；不依赖跨域通配符。防CSRF和随机会话实现需参考 [Spring Security 官方说明](https://docs.spring.io/spring-security/reference/servlet/exploits/csrf.html)。Cookie名称和安全策略为本项目设计决定。
+
+当前Java从MySQL恢复Cookie会话，不使用HttpSession保存认证上下文。普通连续请求保持当前CSRF有效；登录/退出后重取。已验证同一会话连续提交及支付/退款幂等重放；没有通过关闭CSRF解决连续提交问题。
 
 ### 1.4 HTTP与错误码
 
@@ -351,7 +353,7 @@ ME-13同order+attempt重放返回原attempt和最新order；不同attempt但已�
 | ORG-02 | POST `/organizer/events` | O | `{}` → EventManage | 201创建空草稿，category/name可空 |
 | ORG-03 | GET `/organizer/events/{eventId}` | O归属 | path → EventManage | 管理视图含待审/终态；字段按角色投影 |
 | ORG-04 | PUT `/organizer/events/{eventId}/draft` | O归属 | DraftInput → Mutation<EventManage> | DRAFT整体保存；允许不完整；稳定子ID；拒绝非整点；场次删除处理授权见3.2 |
-| ORG-05 | PUT `/organizer/events/{eventId}/poster` | O归属 | multipart `file,expectedVersion` → Mutation<EventManage> | DRAFT/PUBLISHED未整体结束；JPEG/PNG≤5,000,000字节，失败保留旧图 |
+| ORG-05 | PUT `/organizer/events/{eventId}/poster` | O归属 | multipart `file,expectedVersion` → Mutation<EventManage> | DRAFT/PUBLISHED未整体结束；JPEG/PNG≤5,000,000字节；服务端识别真实格式并限制解码像素≤40,000,000（本轮实现上限），失败保留旧图 |
 | ORG-06 | DELETE `/organizer/events/{eventId}/poster` | O归属 | query `expectedVersion` → Mutation<EventManage> | 同可编辑条件；删除关联，不暴露文件系统地址 |
 | ORG-07 | POST `/organizer/events/{eventId}/submission` | O归属 | `{expectedVersion}` → Mutation<EventManage> | 校验完整性/时间/排期/有效类别，更新提交类别快照；不要求草稿编辑时就完整 |
 | ORG-08 | POST `/organizer/events/{eventId}/withdrawal` | O归属 | `{expectedVersion}` → Mutation<EventManage> | 仅PENDING_REVIEW；与审核并发仅一方成功 |
@@ -555,3 +557,7 @@ JOB-04不仅含订单结算项，还必须含终止通知项：终止时固化�
 - 对照状态表、时间边界、库存公式、退款合法依据和消息/日志事务做集成测试；真实数据库夹具不能由页面mock替代。
 - 固定 DTO 与错误code；改名/新增必填字段必须先改本文和双方类型，追踪表同步更新。新增可选字段也要更新mock，禁止前端临时猜字段。
 - 当前没有OpenAPI生成文件或自动契约校验服务；实现骨架阶段应将本文字段落为Java/TS类型并以代表性请求响应夹具校验。本次文档检查不等于接口已运行。
+
+后端设计材料：[字段/建表SQL](database-design.md)、[Redis键字典](redis-design.md)、[Java参数落点](backend-contracts.md)、[自审记录](backend-review.md)。原HTTP业务字段保持不变。
+
+本轮实现及待接入项见[backend-implementation.md](backend-implementation.md)。SYS-01健康诊断未就绪时503仍保留最小组件状态，普通业务失败仍data=null。

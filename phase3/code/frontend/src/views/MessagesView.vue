@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { get, post } from '../api/client';
-import type { Message, Page } from '../types';
+import type { Message, Mutation, Order, Page } from '../types';
 import { dateTime } from '../utils/format';
 import { useTask } from '../composables/useTask';
 import { useAppStore } from '../stores/app';
@@ -37,20 +37,35 @@ async function load() {
 async function markRead() {
   if (!selected.value) return;
   await task.run(async () => {
-    await post(`/me/messages/${selected.value!.id}/read`);
-    selected.value!.readAt = new Date().toISOString();
+    const result = await post<Mutation<Message>>(`/me/messages/${selected.value!.id}/read`);
+    selected.value = result.current;
+    const index = messages.value.findIndex((message) => message.id === result.current.id);
+    if (index >= 0) messages.value[index] = result.current;
   }, '已标记为已读');
 }
-function openTarget() {
+async function openTarget() {
   if (!selected.value?.target) return;
   const target = selected.value.target;
-  router.push(
-    target.resourceType === 'ORDER'
-      ? `/orders/${target.resourceId}`
-      : app.user?.role === 'ORGANIZER'
-        ? `/organizer/events/${target.resourceId}`
-        : `/admin/events/${target.resourceId}`,
-  );
+  await task.run(async () => {
+    if (target.resourceType === 'ACCOUNT') {
+      await router.push('/account');
+    } else if (target.resourceType === 'ORDER') {
+      await router.push(`/orders/${target.resourceId}`);
+    } else if (target.resourceType === 'EVENT') {
+      if (app.user?.role === 'ORGANIZER') {
+        await router.push(`/organizer/events/${target.resourceId}`);
+      } else if (app.user?.role === 'ADMIN') {
+        await router.push(`/admin/events/${target.resourceId}`);
+      } else if (app.user?.role === 'CHECKER') {
+        await router.push('/checker');
+      } else {
+        const orders = await get<Page<Order>>(`/me/orders?eventId=${target.resourceId}&pageSize=1`);
+        await router.push(orders.items.length ? `/orders/${orders.items[0]!.id}` : '/orders');
+      }
+    } else {
+      app.toast('请从对应业务页面查看相关记录');
+    }
+  });
 }
 onMounted(load);
 </script>

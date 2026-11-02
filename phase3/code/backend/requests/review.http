@@ -1,0 +1,22 @@
+@base = http://127.0.0.1:8080/api
+
+### 真实CSRF（200）；在REST Client中保留Cookie，再用返回的token发变更请求
+GET {{base}}/auth/csrf
+
+### 默认离线健康状态（503 NOT_READY / NOT_CONNECTED）
+GET {{base}}/system/health
+
+### 已实现公开查询（未连接数据库时503，不返回假成功空列表）
+GET {{base}}/public/sessions?page=1&pageSize=20
+
+### 私有入口（401）
+GET {{base}}/me/orders
+
+### 不支持的查询字段（422）
+GET {{base}}/public/sessions?pageSzie=20
+
+### 缺CSRF的匿名写入（403 CSRF_INVALID）
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{"username":"example","password":"Example123"}

@@ -1,10 +1,10 @@
 # 活动票务与报名系统：前后端开发项目文档
 
-版本：v0.2（需求与冲突复核后的开发基线） · 日期：2026-11-02 · 实现状态：桌面前端页面/模拟层已实现，Java后端与SQLite未开始；见[前端交付记录](frontend-delivery.md)。
+版本：v0.3（按用户要求改MySQL+Redis及三层后端） · 日期：2026-11-02 · 实现状态：桌面前端页面/模拟层已实现，Java后端业务初版已编写，本机MySQL/Redis已接通，核心业务完整集成未验收；见[前端交付记录](frontend-delivery.md)。
 
 ## 1. 文档职责与依据
 
-本文确定产品范围、前后端边界、页面路由、后端模块、数据责任、关键流程、并行开发及交付方式。[api.md](api.md) 是接口字段和 HTTP 行为的主责文档；[需求追踪表](requirements-traceability.md) 是逐条需求覆盖入口。
+本文确定产品范围、前后端边界、页面路由、后端模块、数据责任、关键流程、并行开发及交付方式。后端框架采用Controller → Service → DAO三层，具体实施顺序见[后端实施方案](backend-plan.md)和[业务初版交付](backend-implementation.md)和[逐接口三层映射](backend-endpoints.md)。[api.md](api.md) 是接口字段和 HTTP 行为的主责文档；[需求追踪表](requirements-traceability.md) 是逐条需求覆盖入口。
 
 业务依据为 [phase1 需求 version5](../../phase1/my_exp_cont/requirements.md) 全文及附录 A～D；建模参考 [phase2 UML](../../phase2/UML/)；视觉参考 [UI 注记](../../phase2/UI界面/UI设计清单与交互注记.md)。业务规则发生歧义时回到 phase1 基线核对；本文对技术、接口、页面的新增选择均是设计决定，不冒充原甲方确认。接口不满足基线时应修改接口，不应默默删减需求。
 
@@ -32,16 +32,17 @@
 | --- | --- | --- |
 | 前端 | Vue 3 + TypeScript + Vite；Vue Router、Pinia | 浏览器应用；统一 API 层；不把模拟数据写入页面组件 |
 | 后端 | Java + Spring Boot；Spring Web、Validation、Security | 模块化单体，REST/JSON；不拆微服务 |
-| 持久化 | SQLite + JDBC + 显式 SQL/迁移脚本 | 用 Repository 隔离 SQL；不依赖 ORM 自动建表 |
-| 事务 | 可验证的 SQLite 写事务封装 | BEGIN IMMEDIATE；业务、成功日志、必发消息同事务 |
+| 业务持久化 | MySQL 8.4 / InnoDB + Spring JDBC + Flyway | DAO接口及Jdbc实现隔离SQL；不依赖ORM自动建表 |
+| 短期辅助数据 | Redis / StringRedisTemplate | 限流策略及Lua适配器已编写，默认未连接；可选缓存关闭，不维护第二份业务事实 |
+| 事务 | MySQL事务、行锁、条件唯一约束 | Service事务边界；业务、成功日志、必发消息与幂等结果同事务 |
 | 文件 | 服务端受控本地目录 | 海报与短期 CSV；私有文件不直接挂静态目录 |
 | 构建 | Maven Wrapper、npm 锁文件 | 初始化时锁定相容的 JDK/Node/依赖版本并记录；本文不假定环境已具备 |
 
-开发拓扑：浏览器 → Vite（计划 5173）→ `/api` 代理 → Java（计划 8080）→ SQLite/受控文件。`/api` 原路径保留，前端不硬编码后端域名。开发服务器只监听本机。
+开发拓扑：浏览器 → Vite（计划 5173）→ `/api` 代理 → Java（计划 8080）→ MySQL（业务）/Redis（短期辅助）/受控文件。`/api` 原路径保留，前端不硬编码后端域名。开发服务器只监听本机。
 
-交付拓扑：浏览器 → Java（8080，同时提供前端静态文件和 API）→ SQLite/受控文件。使用 Vue Router 的 hash 路由，示例 `http://localhost:8080/#/events`，避免刷新深层页面时与 API/文件路由冲突。以下路由表均省略 `#`。
+交付拓扑：浏览器 → Java（8080，同时提供前端静态文件和 API）→ MySQL（业务）/Redis（短期辅助）/受控文件。使用 Vue Router 的 hash 路由，示例 `http://localhost:8080/#/events`，避免刷新深层页面时与 API/文件路由冲突。以下路由表均省略 `#`。
 
-SQLite 开启外键校验，计划使用 WAL、有限 busy timeout；短写事务可在锁等待范围内重试，最终冲突返回可理解的 503。不能用 JVM 单进程锁代替数据库唯一约束，也不能把所有读取放进串行写事务。`BEGIN IMMEDIATE` 仍可能遇到其他写连接占用，需明确回滚与重试；[SQLite 官方事务说明](https://www.sqlite.org/lang_transaction.html)。
+用户于2026-11-02明确改用MySQL+Redis，原SQLite/BEGIN IMMEDIATE方案被替代。MySQL事务内用行锁、唯一约束和统一锁顺序保护库存、有效订单、退款与发布额度；Redis只承担技术限流及允许短期丢失的辅助数据，不作为权威库存、会话撤销、幂等结果或任务进度。普通查询不加写锁，锁等待/死锁按完整事务回滚及有限重试处理，详见[后端事务设计](backend-plan.md)。
 
 ## 4. 计划目录与开发启动
 
@@ -59,13 +60,13 @@ phase3/
     │   ├── package.json
     │   └── package-lock.json
     ├── backend/
-    │   ├── src/main/java/.../{auth,account,event,catalog,search,order,payment,ticket,reporting,governance,message,audit,job,storage,common}/
+    │   ├── src/main/java/com/campus/ticketing/{controller,service,dao,entity,dto,config,filter,interceptor,security,exception,scheduler,common}/
     │   ├── src/main/resources/{db/migration,static}/
     │   ├── src/test/
     │   ├── pom.xml
     │   └── mvnw.cmd
     ├── scripts/                  # 启动、构建、夹具与验收脚本
-    └── runtime/                  # SQLite、海报、CSV；不进入 Git
+    └── runtime/                  # 海报、CSV等受控文件；不进入Git，数据库为外部MySQL
 ```
 
 后续初始化后，在 VS Code 的两个终端运行：
@@ -81,9 +82,9 @@ cd D:\2026Fall-SE\phase3\code\backend
 .\mvnw.cmd spring-boot:run
 ```
 
-计划构建流程：前端类型检查与 `npm run build` → 将 `dist/` 内容同步至后端构建资源目录 → Maven 检查与打包 → `java -jar <生成的jar>`。使用专用脚本清理并同步前端产物，保留 Vue 源码；不手改 `dist/`，不将 SQLite 或开发账号密码打进 JAR。Spring Boot 可从 classpath 的 `/static` 提供静态网页；[官方指南](https://spring.io/guides/gs/serving-web-content/)。Vite 的代理及构建约定见 [开发服务器配置](https://vite.dev/config/server-options) 与 [构建说明](https://vite.dev/guide/static-deploy)。
+计划构建流程：前端类型检查与 `npm run build` → 将 `dist/` 内容同步至后端构建资源目录 → Maven 检查与打包 → `java -jar <生成的jar>`。使用专用脚本清理并同步前端产物，保留 Vue 源码；不手改 `dist/`，不将MySQL/Redis凭据或业务数据打进JAR。Spring Boot 可从 classpath 的 `/static` 提供静态网页；[官方指南](https://spring.io/guides/gs/serving-web-content/)。Vite 的代理及构建约定见 [开发服务器配置](https://vite.dev/config/server-options) 与 [构建说明](https://vite.dev/guide/static-deploy)。
 
-数据库路径由 `APP_DATA_DIR` 指向绝对目录，默认落在 `code/runtime/`；启动脚本解析目录，不能因终端工作目录变化生成多个意外数据库。首次迁移后用显式初始化流程创建 admin，初始口令从本地环境或交互输入取得，仅保存哈希并强制首登改密；不将通用默认口令提交到 Git。测试数据只能在隔离 test/demo 数据目录中显式加载。
+MySQL/Redis连接通过独立环境配置提供，使用专用开发库和Redis key命名空间。`APP_DATA_DIR`只指向海报/CSV受控文件绝对目录，不再存放数据库文件。当前默认离线，Flyway与SQL初始化关闭，DDL仅作为文档审阅稿。后续明确接库、审阅SQL并执行Flyway迁移后，才按显式引导配置创建admin，初始口令从本地配置取得，仅保存哈希并强制改密，不提交通用默认口令。测试使用独立MySQL测试库及Redis test命名空间，不清空已有用户服务。
 
 ## 5. 前后端责任约束
 
@@ -103,20 +104,20 @@ cd D:\2026Fall-SE\phase3\code\backend
 
 ## 6. 后端模块与接口归属
 
-Controller 只负责协议转换与入口校验；Application Service 编排用例；领域服务执行规则；Repository 执行 SQL；UnitOfWork 控制事务。跨模块直接调用应用服务，不绕 HTTP 调用自己。详情接口使用 DTO，禁止直接序列化数据库实体。
+Controller只负责HTTP转换与入口校验；Service接口及ServiceImpl承载业务与事务；DAO接口及Jdbc实现执行SQL；RedisDao只封装短期辅助操作。跨模块直接调用应用服务，不绕 HTTP 调用自己。详情接口使用 DTO，禁止直接序列化数据库实体。
 
 | 模块 | 服务责任 | API 编号 | 核心存储 |
 | --- | --- | --- | --- |
-| auth/account | 登录、会话、改密、注册、人工找回、注销、特权账号 | AUTH-*、ME-01～05、ADM-01～07 | users、login_sessions、phone_identities、recovery_requests |
-| catalog/event | 类别、草稿、审核发布、有限编辑、终止、管理员活动检索 | ORG-*、ADM-08～15、ADM-28、PUB-01 | categories、events、event_sessions、ticket_types、review_decisions、daily_publications |
+| auth/account | 登录、会话、改密、注册、人工找回、注销、特权账号 | AUTH-*、ME-01～05、ADM-01～07 | users、login_sessions、phone_identities、recoveries |
+| catalog/event | 类别、草稿、审核发布、有限编辑、终止、管理员活动检索 | ORG-*、ADM-08～15、ADM-28、PUB-01 | categories、events、event_sessions、ticket_types、review_decisions、publication_quotas |
 | search | 公开场次查询、公开详情 | PUB-02～04 | 上述业务表的只读查询 |
-| order | 报名、候补、确认、取消、资格与库存 | ME-06～12 | registration_orders、idempotency_records |
+| order | 报名、候补、确认、取消、资格与库存 | ME-06～12 | orders、idempotency_records |
 | payment | 支付尝试、退款依据/尝试、合法重试、退款排障队列 | ME-13～18、ADM-16～18、ADM-31 | payment_attempts、refund_requests、refund_attempts |
-| ticket | 票、下载、预核对、签到与补漏 | ME-19～20、CHK-* | tickets、check_ins、checker_assignments |
+| ticket | 票、下载、预核对、签到与补漏 | ME-19～20、CHK-* | tickets、checkins、checker_assignments |
 | reporting | 名单、CSV、实时计数、正式统计 | MGT-* | exports、statistics_snapshots及业务表 |
 | governance | 举报、事实合并、下架、限制计数与依据核查 | ME-21～23、ADM-19～23、ADM-29～30 | reports、violation_facts、business_restrictions、restriction_basis |
-| message/audit | 持久消息、已读、日志、单条审计 | ME-24～26、ADM-24～25 | inbox_messages、audit_logs |
-| job | 到期、递补、结算、清理、重启恢复 | ADM-26～27；JOB-* 为内部入口 | persistent_jobs、termination_items |
+| message/audit | 持久消息、已读、日志、单条审计 | ME-24～26、ADM-24～25 | messages、audit_logs |
+| job | 到期、递补、结算、清理、重启恢复 | ADM-26～27；JOB-* 为内部入口 | jobs、termination_facts |
 | storage/common | 事务、文件、异常、时钟、DTO、页码 | 全部 | schema_migrations、受控文件及约束 |
 
 组织者支付汇总纳入 MGT-07（MGT-05只做实时业务计数），不能读参与者逐笔支付详情。管理活动详情只含配置元数据；订单/已占/余票/出票/退款/签到计数统一走有保留期保护的MGT接口。管理员支付/退款批量排障列表也必须遵守7天规则；已知明确单条订单或依据时，按单条授权链查询，不从列表重建过期名单。
@@ -222,19 +223,21 @@ CHK-02 核对 → 先会话和当前场次授权 → 再显示必要姓名/场�
 
 ID 统一 UUID 字符串，不用手机号、姓名当业务外键；订单姓名/金额保存快照，地点读取最新场次值。数据库时间可保存 UTC epoch 毫秒；API 统一北京时间带偏移的 ISO 字符串。金额整数角 `0..9999990`。
 
+完整33张表、逐字段类型/空值/唯一性与完整建表命令见[MySQL设计](database-design.md)，Redis键见[Redis设计](redis-design.md)。下表是职责摘要，不是另一套物理命名。
+
 | 表组 | 必需字段/约束 |
 | --- | --- |
 | users / phone_identities | 固定角色、规范化用户名/邮箱/手机号、哈希密码、逻辑删除、强制改密；有效账号唯一；手机号跨注销记录次数/黑名单/处罚身份 |
-| login_sessions / recovery_requests | tokenHash、固定 issuedAt/expiresAt/revokedAt；人工核验依据；不保存或记录明文密码 |
-| events / sessions / ticket_types | 归属、状态、类别快照、稳定子对象ID、时间窗口、容量、priceJiao、saleStopped、version |
-| registration_orders | user/session/type、姓名/金额快照、requestId/指纹、状态/原因/截止/占位事实；用户+场次有效状态部分唯一索引 |
-| payment_attempts / refund_requests / refund_attempts | 每单成功支付/退款部分唯一；支付 order+attempt 唯一；同单未关闭USER依据部分唯一；原依据、initialAttemptId、资格快照、撤销/关闭原因、原支付关联、每次结果 |
-| tickets / check_ins / checker_assignments | 每单一票、全局票号唯一、每票一签到；当前检票账号唯一授权；历史签到的人员和场次不回改 |
-| reviews / daily_publications | 审核结果/理由；北京时间日首次发布额度原子更新，取消不返额 |
-| reports / facts / restrictions / basis | 人+场举报唯一；同活动同事实去重；依据消费防重复处罚；限制跨重注册 |
+| login_sessions / recoveries | tokenHash、固定 issuedAt/expiresAt/revokedAt；人工核验依据；不保存或记录明文密码 |
+| events / event_sessions / ticket_types | 归属、状态、类别快照、稳定子对象ID、时间窗口、容量、priceJiao、saleStopped、version |
+| orders | user/session/type、姓名/金额快照、requestId/指纹、状态/原因/截止/占位事实；可空生成列active_guard+唯一索引，保证用户+场次有效唯一 |
+| payment_attempts / refund_requests / refund_attempts | 每单成功支付/退款以success_guard生成列+唯一索引实现；支付order+attempt唯一；同单未关闭USER依据用open_user_guard+唯一索引；原依据、initialAttemptId、资格快照、撤销/关闭原因、原支付关联、每次结果 |
+| tickets / checkins / checker_assignments | 每单一票、全局票号唯一、每票一签到；当前检票账号唯一授权；历史签到的人员和场次不回改 |
+| event_reviews / publication_quotas | 审核结果/理由；北京时间日首次发布额度原子更新，取消不返额 |
+| reports / investigations / behavior_facts / restrictions / restriction_facts | 人+场举报唯一；同活动同事实去重；依据消费防重复处罚；限制跨重注册 |
 | messages / audit_logs | eventKey+recipient 唯一；业务成功同事务；失败日志单独事务尝试，不保存密码/令牌 |
-| jobs / termination_items / notification_items | type、dueAt、deadlineAt、进度、租约/重试、终止时事实；任务+订单/接收人唯一；另有CSV持久任务，不靠内存游标 |
-| snapshots / exports | 结算完成版本、分子分母、终止原因、expiresAt；导出文件受控路径、生成者、完整状态 |
+| jobs / termination_facts / job_items | type、dueAt、deadlineAt、进度、租约/重试、终止时事实；任务+订单/接收人唯一；另有CSV持久任务，不靠内存游标 |
+| statistics_snapshots / exports | 结算完成版本、分子分母、终止原因、expiresAt；导出文件受控路径、生成者、完整状态 |
 
 数据库 CHECK/外键/唯一索引与领域校验共同维护：
 
@@ -290,7 +293,7 @@ ID 统一 UUID 字符串，不用手机号、姓名当业务外键；订单姓�
 
 组织者合格违规事实达到3条时，事实、15天PUBLISH限制、依据消费、日志和通知同事务提交；发布入口实时复核，不等5秒扫描才生效。JOB-06负责恢复核对和到期解除，不重算既有开始时刻，也不在有效期内不断延长处罚。参与者仍由管理员核实后限制。CSV任务保存筛选条件，生成时用一致读快照记录dataAsOf，发布前复查期限，过期转EXPIRED而不是重建。
 
-性能验收按 REQ-023：固定环境（≥4逻辑核/8GB、同机SQLite）、10000活动×2场×2票种、50并发共100查询，四类各25次，≥95次成功且全响应≤1秒，失败/超时不剔除。并发容量按20个合格账号抢最后1名额，必须1未支付+19候补，再支付验证不重复占位。以上均为目标，尚未实测。
+性能验收按 REQ-023：固定环境（≥4逻辑核/8GB、应用与MySQL/Redis在记录的同机环境；替代原SQLite参照重新验收）、10000活动×2场×2票种、50并发共100查询，四类各25次，≥95次成功且全响应≤1秒，失败/超时不剔除。并发容量按20个合格账号抢最后1名额，必须1未支付+19候补，再支付验证不重复占位。以上均为目标，尚未实测。
 
 ## 14. 并行开发与联调计划
 

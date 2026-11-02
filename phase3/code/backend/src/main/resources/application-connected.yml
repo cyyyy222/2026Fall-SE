@@ -1,0 +1,12 @@
+# Full MySQL + Redis profile. No migration/seed on boot. Local MySQL-only: mysql-local.
+app:
+  connections:
+    enabled: true
+  mysql:
+    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/campus_ticketing_dev?connectionTimeZone=UTC&characterEncoding=UTF-8}
+    username: ${MYSQL_USERNAME}
+    password: ${MYSQL_PASSWORD}
+  redis:
+    host: ${REDIS_HOST:127.0.0.1}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}

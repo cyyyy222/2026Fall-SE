@@ -1,0 +1,7 @@
+target/
+.m2/
+.tools/
+.env
+application-local-private.yml
+data/
+*.log

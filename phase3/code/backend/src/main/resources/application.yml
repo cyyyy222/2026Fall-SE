@@ -1,0 +1,45 @@
+server:
+  address: 127.0.0.1
+  port: 8080
+  error:
+    include-message: never
+    include-stacktrace: never
+spring:
+  application:
+    name: ticketing-backend
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
+      - org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
+  flyway:
+    enabled: false
+  sql:
+    init:
+      mode: never
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+      fail-on-numbers-for-enums: true
+      accept-float-as-int: false
+    serialization:
+      write-dates-as-timestamps: false
+  servlet:
+    multipart:
+      max-file-size: 5000000B
+      max-request-size: 5100000B
+app:
+  # Review default: no DataSource/Lettuce connection is created, no SQL is executed.
+  connections:
+    enabled: false
+  environment: local
+  jobs:
+    enabled: false
+    poll-ms: 5000
+  data-dir: ${APP_DATA_DIR:data}
+  rate:
+    hmac-secret: ${APP_RATE_HMAC_SECRET:}
+  cookies:
+    secure: ${APP_COOKIE_SECURE:false}

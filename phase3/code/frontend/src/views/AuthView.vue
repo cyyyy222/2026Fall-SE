@@ -21,12 +21,28 @@ const fields = reactive({
   phone: '',
   role: 'PARTICIPANT' as Role,
 });
-const demos = [
-  ['participant', '参与者', 'Ticket'],
-  ['organizer', '组织者', 'CalendarDays'],
-  ['checker', '检票员', 'ScanLine'],
-  ['admin', '管理员', 'ShieldCheck'],
-];
+const showHttpDemos = !isMock && import.meta.env.VITE_DEMO_ACCOUNTS === 'true';
+const demos = isMock
+  ? [
+      ['participant', '参与者', 'Ticket'],
+      ['organizer', '组织者', 'CalendarDays'],
+      ['checker', '检票员', 'ScanLine'],
+      ['admin', '管理员', 'ShieldCheck'],
+    ]
+  : [
+      ['participant_demo', '参与者', 'Ticket'],
+      ['organizer_demo', '组织者', 'CalendarDays'],
+      ['checker_live_demo', '检票员', 'ScanLine'],
+      ['admin_demo', '管理员', 'ShieldCheck'],
+    ];
+function selectDemo(username: string) {
+  fields.username = username;
+  fields.password = isMock
+    ? 'Demo2026'
+    : username === 'admin_demo'
+      ? 'AdminDemo123'
+      : 'DemoPass123';
+}
 const title = computed(() =>
   mode.value === 'register'
     ? '开启下一场相遇'
@@ -188,9 +204,10 @@ async function submit() {
             >
           </p>
         </form>
-        <div v-if="mode === 'login' && isMock" class="auth-demo">
+        <div v-if="mode === 'login' && (isMock || showHttpDemos)" class="auth-demo">
           <div class="auth-demo-title">
-            <span>选择演示账号，填入登录信息</span><span>本地模拟</span>
+            <span>选择演示账号，填入登录信息</span
+            ><span>{{ isMock ? '本地模拟' : '真实接口 · 本机演示' }}</span>
           </div>
           <div class="demo-accounts">
             <button
@@ -198,19 +215,26 @@ async function submit() {
               :key="demo[0]"
               class="demo-account"
               :class="{ active: fields.username === demo[0] }"
-              @click="
-                fields.username = demo[0]!;
-                fields.password = 'Demo2026';
-              "
+              @click="selectDemo(demo[0]!)"
             >
               <AppIcon :name="demo[2]!" /><span>{{ demo[1] }}</span>
             </button>
           </div>
-          <p class="demo-password">统一密码：Demo2026 · 每个账号身份固定</p>
+          <p class="demo-password">
+            {{
+              isMock
+                ? '统一密码：Demo2026 · 每个账号身份固定'
+                : '参与者/组织者/检票员：DemoPass123 · 管理员初始口令：AdminDemo123，首次登录须修改'
+            }}
+          </p>
         </div>
       </section>
       <p v-if="isMock" class="auth-safety">
         当前为前端演示，信息仅保存在本机浏览器。请使用演示资料，不要输入真实密码或个人信息。
+      </p>
+      <p v-else-if="showHttpDemos" class="auth-safety">
+        当前通过 Java 后端读写
+        MySQL。支付为本地模拟，不会实际扣款；管理员修改口令后请手动填写新口令。
       </p>
     </div>
   </div>

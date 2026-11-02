@@ -1,0 +1,54 @@
+import { defineStore } from 'pinia';
+import { computed, ref } from 'vue';
+import { get, post } from '../api/client';
+import type { User } from '../types';
+import { ApiError } from '../api/errors';
+
+export const useAppStore = defineStore('app', () => {
+  const user = ref<User | null>(null);
+  const initialized = ref(false);
+  const notification = ref<{ message: string; type: 'success' | 'error' } | null>(null);
+  let notificationTimer: ReturnType<typeof setTimeout>;
+  const home = computed(() =>
+    user.value?.role === 'ORGANIZER'
+      ? '/organizer/events'
+      : user.value?.role === 'CHECKER'
+        ? '/checker'
+        : user.value?.role === 'ADMIN'
+          ? '/admin/reviews'
+          : '/events',
+  );
+  function toast(message: string, type: 'success' | 'error' = 'success') {
+    clearTimeout(notificationTimer);
+    notification.value = { message, type };
+    notificationTimer = setTimeout(() => {
+      notification.value = null;
+    }, 5000);
+  }
+  function error(error: unknown) {
+    if (error instanceof ApiError && (error.status === 401 || error.code === 'ACCOUNT_UNAVAILABLE'))
+      user.value = null;
+    toast(error instanceof Error ? error.message : '请求未完成，请稍后重试', 'error');
+  }
+  async function initialize() {
+    if (initialized.value) return;
+    try {
+      user.value = await get<User>('/me');
+    } catch {
+      user.value = null;
+    }
+    initialized.value = true;
+  }
+  async function login(username: string, password: string) {
+    user.value = await post<User>('/auth/login', { username, password });
+    return home.value;
+  }
+  async function logout() {
+    try {
+      await post('/auth/logout');
+    } finally {
+      user.value = null;
+    }
+  }
+  return { user, initialized, notification, home, toast, error, initialize, login, logout };
+});

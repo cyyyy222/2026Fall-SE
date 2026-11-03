@@ -28,6 +28,7 @@ async function load() {
     if (route.params.messageId)
       selected.value = await get<Message>(`/me/messages/${route.params.messageId}`);
     else selected.value = messages.value[0];
+    await app.refreshUnreadMessages();
   } catch (e) {
     error.value = e instanceof Error ? e.message : '无法加载消息';
   } finally {
@@ -41,6 +42,7 @@ async function markRead() {
     selected.value = result.current;
     const index = messages.value.findIndex((message) => message.id === result.current.id);
     if (index >= 0) messages.value[index] = result.current;
+    await app.refreshUnreadMessages();
   }, '已标记为已读');
 }
 async function openTarget() {
@@ -81,7 +83,7 @@ onMounted(load);
   <div v-else class="message-layout">
     <section class="message-list">
       <div class="message-list-header">
-        <strong style="font-size: 12px">我的消息 · {{ messages.length }}</strong
+        <strong style="font-size: 15px">我的消息 · {{ messages.length }}</strong
         ><label class="checkbox-label"
           ><input v-model="unreadOnly" type="checkbox" @change="load" />仅未读</label
         >
@@ -126,7 +128,7 @@ onMounted(load);
         </button>
       </div>
       <p class="field-help" style="margin-top: 30px">
-        消息生成180天后到期。点击业务入口后仍会重新检查最新状态与权限。
+        消息保存 180 天，到期后不再显示。点击业务入口后，系统仍会按最新状态和权限重新检查。
       </p>
     </section>
     <StatePanel

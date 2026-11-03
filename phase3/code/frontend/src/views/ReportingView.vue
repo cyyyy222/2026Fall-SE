@@ -40,6 +40,7 @@ const chart = computed(() =>
   Object.entries(counts.value?.orderCounts || {}).map(([status, value]) => ({ status, value })),
 );
 const chartMax = computed(() => Math.max(1, ...chart.value.map((c) => c.value)));
+const chartTotal = computed(() => chart.value.reduce((sum, item) => sum + item.value, 0));
 async function load() {
   loading.value = true;
   error.value = '';
@@ -127,10 +128,10 @@ onMounted(load);
   <div class="alert info" style="margin-bottom: 24px">
     <AppIcon name="ShieldCheck" />
     <p>
-      名单、统计和CSV统一保留至整活动实际终结后7天，所有角色均受限制。{{
+      活动名单、统计和导出文件在活动结束后保留 7 天，所有角色都一样，过期后不再提供。{{
         checker
-          ? '检票员仅可查看当前授权场次，不具备导出或支付汇总权限。'
-          : '下载时再次校验权限和期限，晚导出不会延长期限。'
+          ? '检票员只能查看当前授权场次，没有导出和支付汇总权限。'
+          : '每次下载都会重新检查权限和期限，晚导出也不会延长期限。'
       }}
     </p>
   </div>
@@ -183,7 +184,7 @@ onMounted(load);
               <th>票种</th>
               <th>报名状态</th>
               <th>签到状态</th>
-              <th>票 id</th>
+              <th>电子票号</th>
             </tr>
           </thead>
           <tbody>
@@ -201,7 +202,7 @@ onMounted(load);
       <StatePanel
         v-else
         title="没有匹配的名单记录"
-        description="调整筛选条件；空结果导出仍会包含CSV表头。"
+        description="调整筛选条件；没有记录时导出的文件仍会包含表头。"
         icon="UsersRound"
       />
       <div class="pagination">
@@ -246,29 +247,32 @@ onMounted(load);
           <div class="stat-card rose">
             <div class="stat-label">当前候补</div>
             <div class="stat-number">{{ counts.currentWaitlist }}</div>
-            <div class="stat-foot">递补待确认另计</div>
+            <div class="stat-foot">已递补待确认的另算</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">累计候补申请</div>
             <div class="stat-number">{{ counts.cumulativeWaitlistApplications }}</div>
-            <div class="stat-foot">按申请订单计数，重试不累计</div>
+            <div class="stat-foot">按订单计数，重试不重复累计</div>
           </div></template
         >
       </div>
       <section v-if="!checker" class="panel">
         <div class="panel-heading">
           <h2>当前订单状态分布</h2>
-          <span class="tag">实时读取 · 非历史快照</span>
+          <span class="tag">实时统计 · 不是历史快照</span>
         </div>
-        <div class="chart-bars">
+        <div v-if="chartTotal" class="chart-bars">
           <div v-for="c in chart" :key="c.status" class="chart-column">
             <b>{{ c.value }}</b>
             <div class="bar" :style="{ height: `${Math.max(2, (c.value / chartMax) * 110)}px` }" />
             <small>{{ label(c.status) }}</small>
           </div>
         </div>
+        <p v-else class="empty-inline chart-empty">
+          当前还没有订单。有人报名后，这里会显示各订单状态的数量。
+        </p>
         <p class="field-help">
-          操作事务完成后，下一次刷新反映最新结果。未结束场次不提供最终缺席率。
+          数据在每次业务操作完成后更新，刷新即可看到最新结果；场次结束前不计算最终缺席率。
         </p>
       </section>
     </section>
@@ -316,8 +320,8 @@ onMounted(load);
         <p>
           {{
             stats?.settlementStatus === 'PROCESSING'
-              ? '订单尚在结算处理中，完成后才发布完整快照。'
-              : '当前活动尚未结束，正式报表尚未生成。这里不会用0伪装未完成的统计。'
+              ? '订单还在结算处理中，完成后才会生成完整统计。'
+              : '活动尚未结束，正式统计还没有生成；这里的空白不代表 0。'
           }}
         </p>
       </div>

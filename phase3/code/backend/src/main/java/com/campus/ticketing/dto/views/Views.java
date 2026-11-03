@@ -83,7 +83,22 @@ public final class Views {
       RestrictionKind kind,
       OffsetDateTime startsAt,
       OffsetDateTime endsAt,
-      String reason) {}
+      String reason,
+      String source,
+      boolean active) {}
+
+  public record RestrictionAppealView(
+      UUID id,
+      UUID restrictionId,
+      UUID userId,
+      String username,
+      String reason,
+      String evidenceText,
+      AppealStatus status,
+      OffsetDateTime createdAt,
+      OffsetDateTime reviewedAt,
+      String decisionNote,
+      RestrictionView restriction) {}
 
   public record Registered(UUID id, String username, Role role) {}
 
@@ -153,6 +168,7 @@ public final class Views {
       String name,
       UUID categoryId,
       String categoryNameSnapshot,
+      String proposedCategoryName,
       String description,
       String posterUrl,
       List<SessionManage> sessions,
@@ -384,7 +400,10 @@ public final class Views {
 
   public record TicketPreview(
       UUID ticketId,
+      UUID userId,
+      String username,
       String attendeeName,
+      String phone,
       UUID sessionId,
       String sessionName,
       String ticketTypeName,
@@ -574,6 +593,8 @@ public final class Views {
       OffsetDateTime readAt,
       MessageTarget target,
       OffsetDateTime actionDeadline) {}
+
+  public record UnreadCount(int count) {}
 
   public record AuditLog(
       UUID id,

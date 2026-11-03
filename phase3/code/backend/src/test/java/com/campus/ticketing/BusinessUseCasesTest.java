@@ -381,6 +381,180 @@ class BusinessUseCasesTest {
   }
 
   @Test
+  void checkinWindowOpensTwoHoursBeforeAndClosesAtHalfOfTheSession() {
+    UUID order = paid(alice);
+    UUID ticket = b.list(TicketEntity.class, eq("orderId", order)).get(0).id();
+    var checks = new CheckInUseCases(b, identity, events, orders);
+    var c = actor(checker);
+    clock.advance(Duration.ofHours(5).plusMinutes(59));
+    assertThatThrownBy(() -> checks.previewTicket(c, new Requests.Ticket(ticket)))
+        .isInstanceOfSatisfying(
+            ApiException.class, e -> assertThat(e.code()).isEqualTo("CHECKIN_NOT_OPEN"));
+    clock.advance(Duration.ofMinutes(1));
+    var preview = checks.previewTicket(c, new Requests.Ticket(ticket)).data();
+    assertThat(preview.userId()).isEqualTo(alice);
+    assertThat(preview.username()).isEqualTo("alice");
+    assertThat(preview.attendeeName()).isEqualTo("张三");
+    assertThat(preview.phone()).isNotBlank();
+    clock.advance(Duration.ofHours(3));
+    assertThatThrownBy(() -> checks.previewTicket(c, new Requests.Ticket(ticket)))
+        .isInstanceOfSatisfying(
+            ApiException.class, e -> assertThat(e.code()).isEqualTo("CHECKIN_ENDED"));
+  }
+
+  @Test
+  void waitlistPromotionAndPaymentMayFinishAfterRegistrationCloseBeforeCheckinEnds() {
+    UUID paidOrder = paid(alice);
+    var queued = orders.register(actor(bob), registration(UUID.randomUUID())).data().current().id();
+    assertThat(b.need(OrderEntity.class, queued, false).status()).isEqualTo("WAITLISTED");
+    orders.requestRefund(
+        actor(alice), paidOrder, new Requests.Refund(UUID.randomUUID(), "测试释放名额"));
+    clock.advance(Duration.ofHours(7).plusMinutes(30)); // after registration close, before check-in close
+    workflows.promoteType(type);
+    var pending = b.need(EventSessionEntity.class, session, false);
+    long close = DomainRules.checkinClose(pending.startsAtMs(), pending.endsAtMs());
+    var offered = b.need(OrderEntity.class, queued, false);
+    assertThat(offered.status()).isEqualTo("OFFERED");
+    assertThat(offered.confirmDeadlineMs()).isEqualTo(close);
+    orders.confirmPromotion(actor(bob), queued, new Requests.Empty());
+    var unpaid = b.need(OrderEntity.class, queued, false);
+    assertThat(unpaid.status()).isEqualTo("UNPAID");
+    assertThat(unpaid.payDeadlineMs()).isEqualTo(Math.min(b.now() + 15 * 60_000, close));
+    orders.pay(actor(bob), queued, new Requests.Attempt(UUID.randomUUID()));
+    assertThat(b.need(OrderEntity.class, queued, false).status()).isEqualTo("REGISTERED");
+  }
+
+  @Test
+  void organizerProposedCategoryIsCreatedByAdminApproval() {
+    var created = events.createDraft(actor(owner), new Requests.Empty());
+    UUID draftId = created.data().id();
+    var now = b.time(b.now());
+    UUID sessionId = UUID.randomUUID(), typeId = UUID.randomUUID();
+    var saved =
+        events.saveDraft(
+            actor(owner),
+            draftId,
+            new Requests.Draft(
+                created.data().version(),
+                "校园市集",
+                null,
+                "由组织者提出新类别的测试活动",
+                List.of(
+                    new Requests.SessionDraft(
+                        sessionId,
+                        "市集场",
+                        now.plusHours(3),
+                        now.plusHours(5),
+                        "学校操场",
+                        10,
+                        now.plusHours(1),
+                        now.plusHours(2),
+                        List.of(
+                            new Requests.TicketTypeDraft(typeId, "免费票", 10, 0L, false)))),
+                "校园市集"));
+    var submitted =
+        events.submitReview(
+            actor(owner), draftId, new Requests.Version(saved.data().current().version()));
+    assertThat(submitted.data().current().status()).isEqualTo(EventStatus.PENDING_REVIEW);
+    UUID checkerId = user("marketchecker", "CHECKER");
+    db.insert(
+        new CheckerAssignmentEntity(
+            UUID.randomUUID(), checkerId, sessionId, admin, b.now(), null, null));
+    var approved =
+        events.approve(
+            actor(admin), draftId, new Requests.Version(submitted.data().current().version()));
+    assertThat(approved.data().current().status()).isEqualTo(EventStatus.PUBLISHED);
+    var category =
+        b.db()
+            .one(CategoryEntity.class, eq("nameNormalized", BusinessSupport.normalize("校园市集")), false)
+            .orElseThrow();
+    assertThat(b.need(EventEntity.class, draftId, false).categoryId()).isEqualTo(category.id());
+    assertThat(b.need(EventEntity.class, draftId, false).categoryNameSnapshot())
+        .isEqualTo("校园市集");
+  }
+
+  @Test
+  void waitlistedOrderExpiresWhenCheckinCloses() {
+    paid(alice);
+    UUID queued = orders.register(actor(bob), registration(UUID.randomUUID())).data().current().id();
+    assertThat(b.need(OrderEntity.class, queued, false).status()).isEqualTo("WAITLISTED");
+    clock.advance(Duration.ofHours(9));
+    workflows.expireOrder(queued);
+    assertThat(b.need(OrderEntity.class, queued, false).status()).isEqualTo("CANCELLED");
+  }
+
+  @Test
+  void weeklyAbsenceScanWarnsTwiceThenBansAndAppealCanLiftIt() {
+    var phone = b.need(UserEntity.class, alice, false).phoneIdentityId();
+    var start = b.now() - 86_400_000L;
+    var end = b.now() + 86_400_000L;
+    for (int i = 0; i < 2; i++)
+      db.insert(
+          new BehaviorFactEntity(
+              UUID.randomUUID(),
+              phone,
+              "NATURAL_ABSENCE",
+              UUID.randomUUID(),
+              null,
+              b.now() - 1000 + i,
+              "测试缺席"));
+    governance.weeklyAbsenceScan(start, end);
+    assertThat(b.list(MessageEntity.class, and(eq("recipientId", alice), eq("type", "ABSENCE_WARNING"))))
+        .hasSize(1);
+    db.insert(
+        new BehaviorFactEntity(
+            UUID.randomUUID(),
+            phone,
+            "NATURAL_ABSENCE",
+            UUID.randomUUID(),
+            null,
+            b.now(),
+            "测试缺席"));
+    governance.weeklyAbsenceScan(start, end);
+    var restriction =
+        b.db()
+            .one(RestrictionEntity.class, and(eq("phoneIdentityId", phone), eq("source", "WEEKLY_ABSENCE")), false)
+            .orElseThrow();
+    assertThat(b.restricted(phone, "REGISTER")).isTrue();
+
+    var appeal =
+        governance.createAppeal(
+            actor(alice),
+            new Requests.RestrictionAppeal(restriction.id(), "本周因住院无法到场，附医院证明说明。", "住院证明"));
+    assertThat(appeal.data().status()).isEqualTo(AppealStatus.PENDING);
+    assertThat(
+            governance
+                .listAppeals(
+                    actor(admin),
+                    new com.campus.ticketing.dto.queries.Queries.RestrictionAppeals(
+                        AppealStatus.PENDING, 1, 20))
+                .data()
+                .items())
+        .hasSize(1);
+    governance.resolveAppeal(
+        actor(admin),
+        appeal.data().id(),
+        new Requests.ResolveAppeal(AppealStatus.APPROVED, "已核对住院证明，同意解除"));
+    assertThat(b.restricted(phone, "REGISTER")).isFalse();
+    assertThat(b.need(RestrictionEntity.class, restriction.id(), false).revokedAtMs()).isNotNull();
+  }
+
+  @Test
+  void reportDeduplicatesByEventAndStillAllowsOtherEvents() {
+    governance.createReport(
+        actor(alice),
+        new Requests.Report(session, "活动信息不符", "宣传与实际不一致", "截图链接"));
+    UUID secondSession = session(event, 19, 21);
+    assertThatThrownBy(
+            () ->
+                governance.createReport(
+                    actor(alice),
+                    new Requests.Report(secondSession, "活动信息不符", "同一活动再次举报", "截图链接")))
+        .isInstanceOfSatisfying(
+            ApiException.class, e -> assertThat(e.code()).isEqualTo("DUPLICATE_REPORT"));
+  }
+
+  @Test
   void terminalEventStopsCheckinImmediatelyAndFreePlatformRefundCreatesNoVoluntaryFact() {
     var typeRow = b.need(TicketTypeEntity.class, type, false);
     db.save(copy(typeRow, "priceJiao", 0L));
@@ -456,18 +630,26 @@ class BusinessUseCasesTest {
   }
 
   @Test
-  void reportsEnforceRollingQuotaAndReadDoesNotMarkMessageRead() {
+  void reportsAreLimitedPerEventButNotByMonthlyQuota() {
+    UUID firstEvent = UUID.randomUUID(), firstSession = UUID.randomUUID();
     for (int i = 0; i < 5; i++) {
-      UUID sid = session(event, 18, 20);
+      UUID e = event("PUBLISHED");
+      UUID sid = session(e, 18, 20);
+      if (i == 0) {
+        firstEvent = e;
+        firstSession = sid;
+      }
       governance.createReport(actor(alice), new Requests.Report(sid, "理由", "说明", "证据"));
     }
-    UUID sixth = session(event, 18, 20);
+    UUID sameEventOtherSession = session(firstEvent, 19, 21);
     assertThatThrownBy(
             () ->
-                governance.createReport(actor(alice), new Requests.Report(sixth, "理由", "说明", "证据")))
+                governance.createReport(
+                    actor(alice),
+                    new Requests.Report(sameEventOtherSession, "理由", "说明", "证据")))
         .isInstanceOfSatisfying(
-            ApiException.class, e -> assertThat(e.code()).isEqualTo("REPORT_LIMIT_REACHED"));
-    b.notify(alice, "example", "EVENT_CHANGED", "标题", "内容", "EVENT", event, b.now() + 1000);
+            ApiException.class, e -> assertThat(e.code()).isEqualTo("DUPLICATE_REPORT"));
+    b.notify(alice, "example", "EVENT_CHANGED", "标题", "内容", "EVENT", firstEvent, b.now() + 1000);
     var message = b.list(MessageEntity.class, null).get(0);
     governance.messageDetail(actor(alice), message.id());
     assertThat(b.need(MessageEntity.class, message.id(), false).readAtMs()).isNull();
@@ -574,6 +756,55 @@ class BusinessUseCasesTest {
         else assertThat(account.maskedPhone()).contains("****").hasSize(11);
       }
     }
+  }
+
+  @Test
+  void checkerCanBeReassignedToAnotherEventWithOneActiveAssignment() {
+    var accounts =
+        new AdminAccountUseCases(
+            b, identity, events, new LocalSmsDelivery(b, new MockEnvironment()));
+    var otherEvent = event("PUBLISHED");
+    var otherSession = session(otherEvent, 18, 20);
+    // The original session must keep at least one available checker.
+    var secondChecker = user("checker2", "CHECKER");
+    db.insert(
+        new CheckerAssignmentEntity(
+            UUID.randomUUID(), secondChecker, session, admin, b.now(), null, null));
+    var version = b.need(UserEntity.class, checker, false).version();
+    var updated =
+        accounts.updateAccount(
+            actor(admin),
+            checker,
+            new Requests.UpdateAccount(version, PatchField.absent(), PatchField.of(otherSession)));
+    assertThat(updated.data().current().assignedSessionId()).isEqualTo(otherSession);
+    assertThat(updated.data().current().eventId()).isEqualTo(otherEvent);
+    var assignments = b.list(CheckerAssignmentEntity.class, eq("checkerId", checker));
+    assertThat(assignments).hasSize(2);
+    assertThat(assignments.stream().filter(a -> a.revokedAtMs() == null).toList())
+        .singleElement()
+        .satisfies(a -> assertThat(a.sessionId()).isEqualTo(otherSession));
+    assertThat(assignments.stream().filter(a -> a.revokedAtMs() != null).toList())
+        .singleElement()
+        .satisfies(a -> assertThat(a.revocationReason()).isEqualTo("REASSIGNED"));
+  }
+
+  @Test
+  void privilegedAccountUsernamesStayUniqueIgnoringCaseAndOuterSpaces() {
+    var accounts =
+        new AdminAccountUseCases(
+            b, identity, events, new LocalSmsDelivery(b, new MockEnvironment()));
+    var first =
+        accounts.createAccount(
+            actor(admin),
+            new Requests.CreateAccount("checkerNew", "Password123", ManagedRole.CHECKER, session));
+    assertThat(first.data().username()).isEqualTo("checkerNew");
+    assertThatThrownBy(
+            () ->
+                accounts.createAccount(
+                    actor(admin),
+                    new Requests.CreateAccount(
+                        "  CHECKERNEW ", "Password123", ManagedRole.CHECKER, session)))
+        .isInstanceOf(ApiException.class);
   }
 
   @Test

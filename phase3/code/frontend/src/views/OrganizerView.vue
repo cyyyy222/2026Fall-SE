@@ -1,18 +1,22 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { get, post } from '../api/client';
 import type { CampusEvent, Page } from '../types';
 import { dateTime } from '../utils/format';
 import { useTask } from '../composables/useTask';
+import { useAppStore } from '../stores/app';
 import PageHeading from '../components/PageHeading.vue';
 import StatePanel from '../components/StatePanel.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import AppIcon from '../components/AppIcon.vue';
 const route = useRoute();
+const router = useRouter();
+const app = useAppStore();
 const task = useTask();
 const events = ref<CampusEvent[]>([]);
 const loading = ref(true);
+const creating = ref(false);
 const error = ref('');
 const status = ref('');
 const panel = computed(() => (typeof route.query.panel === 'string' ? route.query.panel : ''));
@@ -43,6 +47,17 @@ async function withdraw(e: CampusEvent) {
     await load();
   }, '已撤回审核，活动返回草稿');
 }
+async function createEvent() {
+  creating.value = true;
+  try {
+    const created = await post<CampusEvent>('/organizer/events');
+    await router.push(`/organizer/events/${created.id}/edit`);
+  } catch (e) {
+    app.error(e);
+  } finally {
+    creating.value = false;
+  }
+}
 onMounted(load);
 </script>
 <template>
@@ -56,9 +71,9 @@ onMounted(load);
           : '活动工作台'
     "
     description="从一份草稿，到一次完整的相聚。"
-    ><RouterLink to="/organizer/events/new" class="btn primary"
-      ><AppIcon name="Plus" :size="16" />新建活动</RouterLink
-    ></PageHeading
+    ><button class="btn primary" :disabled="creating" @click="createEvent">
+      <AppIcon name="Plus" :size="16" />{{ creating ? '正在创建…' : '新建活动' }}
+    </button></PageHeading
   >
   <div v-if="!panel" class="stat-grid">
     <div class="stat-card">
@@ -173,7 +188,7 @@ onMounted(load);
   <div class="alert info" style="margin-top: 23px">
     <AppIcon name="HelpCircle" />
     <p>
-      活动审核通过即发布。发布后仅允许修改简介、海报，以及未结束场次的地点、容量和停售设置；时间、名称、类别与票价保持不变。
+      审核通过后活动立即发布。发布后只能修改简介、海报，以及未结束场次的地点、容量和停售设置；名称、类别、时间和票价不能再改。
     </p>
   </div>
 </template>

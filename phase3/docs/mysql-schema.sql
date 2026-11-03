@@ -138,6 +138,7 @@ CREATE TABLE events (
   name VARCHAR(60) NULL,
   category_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
   category_name_snapshot VARCHAR(60) NULL,
+  proposed_category_name VARCHAR(60) NULL,
   description VARCHAR(500) NULL,
   poster_file_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
   submitted_at_ms BIGINT NULL,
@@ -495,10 +496,35 @@ CREATE TABLE restrictions (
   reason VARCHAR(200) NOT NULL,
   created_by CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
   ended_message_at_ms BIGINT NULL,
+  source VARCHAR(30) NULL,
+  source_ref VARCHAR(40) NULL,
+  revoked_at_ms BIGINT NULL,
   FOREIGN KEY (phone_identity_id) REFERENCES phone_identities(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CHECK (ends_at_ms = starts_at_ms + 1296000000),
   KEY ix_restriction_active (phone_identity_id,kind,ends_at_ms,id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin;
+
+
+-- 参与者对15天限制的申诉；同一限制可补充证据再次申诉，但同时只允许一条待审。
+CREATE TABLE restriction_appeals (
+  id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+  restriction_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  reason VARCHAR(1000) NOT NULL,
+  evidence_text VARCHAR(2000) NULL,
+  status VARCHAR(20) NOT NULL,
+  created_at_ms BIGINT NOT NULL,
+  reviewed_by CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  reviewed_at_ms BIGINT NULL,
+  decision_note VARCHAR(1000) NULL,
+  version BIGINT NOT NULL,
+  FOREIGN KEY (restriction_id) REFERENCES restrictions(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CHECK (status IN ('PENDING','APPROVED','REJECTED')),
+  KEY ix_appeal_status (status,created_at_ms,id),
+  KEY ix_appeal_user (user_id,created_at_ms,id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin;
 
 

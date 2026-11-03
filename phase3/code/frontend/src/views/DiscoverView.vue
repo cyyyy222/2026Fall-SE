@@ -264,8 +264,8 @@ onMounted(async () => {
         <select v-model="sort" class="sort-select" aria-label="活动排序" @change="load(true)">
           <option value="startsAt-asc">即将开始优先</option>
           <option value="startsAt-desc">开始时间倒序</option>
-          <option value="remaining-desc">剩余名额优先</option>
-          <option value="remaining-asc">剩余名额升序</option>
+          <option value="remaining-desc">剩余名额由多到少</option>
+          <option value="remaining-asc">剩余名额由少到多</option>
         </select>
       </div>
       <StatePanel
@@ -394,16 +394,16 @@ onMounted(async () => {
       <section class="aside-tips">
         <h4>让相聚更从容</h4>
         <div>
-          <AppIcon name="UserRound" :size="13" />
-          <p>一人一票，仅限当前账号本人报名。</p>
+          <AppIcon name="UserRound" :size="14" />
+          <p>每个账号每场限 1 张票，只能给本人报名，不能替他人报名或转赠。</p>
         </div>
         <div>
-          <AppIcon name="Clock3" :size="13" />
-          <p>名额保留15分钟，请及时完成模拟支付。</p>
+          <AppIcon name="Clock3" :size="14" />
+          <p>提交报名后名额保留 15 分钟，请在这段时间内确认支付。</p>
         </div>
         <div>
-          <AppIcon name="Leaf" :size="13" />
-          <p>免费活动也需要确认支付，才算完成报名。</p>
+          <AppIcon name="Leaf" :size="14" />
+          <p>免费票也要走一次确认支付，完成后才会生成电子票。</p>
         </div>
       </section>
     </aside>

@@ -37,6 +37,17 @@ public class MessageController {
   }
 
   @ApiContract(
+      id = "ME-31",
+      idempotency = false,
+      query = {})
+  @PreAuthorize("isAuthenticated()")
+  @GetMapping(value = "/me/messages/unread-count")
+  public ResponseEntity<ApiResponse<Views.UnreadCount>> unreadCount(
+      @CurrentRequest RequestContext context) {
+    return responses.toResponse(messageService.unreadCount(context));
+  }
+
+  @ApiContract(
       id = "ME-25",
       idempotency = false,
       query = {})

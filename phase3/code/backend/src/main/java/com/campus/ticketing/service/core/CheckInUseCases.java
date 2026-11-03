@@ -45,8 +45,8 @@ public class CheckInUseCases {
               new Views.CheckerContext(
                   events.publicSession(e, s),
                   EventStatus.valueOf(e.status()),
-                  b.time(s.startsAtMs() - 30 * 60_000),
-                  b.time(s.endsAtMs()),
+                  b.time(DomainRules.checkinOpen(s.startsAtMs())),
+                  b.time(DomainRules.checkinClose(s.startsAtMs(), s.endsAtMs())),
                   List.of("PREVIEW", "CHECK_IN")));
         });
   }
@@ -64,8 +64,12 @@ public class CheckInUseCases {
         t.status().equals("VALID") && o.status().equals("REGISTERED"),
         "TICKET_INVALID",
         "票已失效或不可验票");
-    require(b.now() >= s.startsAtMs() - 30 * 60_000, "CHECKIN_NOT_OPEN", "尚未到验票窗口");
-    require(b.now() < s.endsAtMs(), "CHECKIN_ENDED", "验票窗口已结束");
+    require(
+        b.now() >= DomainRules.checkinOpen(s.startsAtMs()), "CHECKIN_NOT_OPEN", "尚未到验票窗口");
+    require(
+        b.now() < DomainRules.checkinClose(s.startsAtMs(), s.endsAtMs()),
+        "CHECKIN_ENDED",
+        "验票窗口已结束");
   }
 
   public UseCaseResult<Views.TicketPreview> previewTicket(RequestContext c, Requests.Ticket r) {
@@ -78,10 +82,16 @@ public class CheckInUseCases {
           var s = b.need(EventSessionEntity.class, o.sessionId(), false);
           var check = b.db().one(CheckInEntity.class, eq("ticketId", t.id()), false).orElse(null);
           if (check == null) usable(t, o);
+          var owner = b.need(UserEntity.class, o.userId(), false);
+          var phoneId = loginPhoneId(owner);
+          var phone = phoneId == null ? null : b.need(PhoneIdentityEntity.class, phoneId, false).phone();
           return ok(
               new Views.TicketPreview(
                   t.id(),
+                  owner.id(),
+                  owner.username(),
                   o.attendeeNameSnapshot(),
+                  phone,
                   s.id(),
                   o.sessionNameSnapshot(),
                   o.ticketTypeNameSnapshot(),

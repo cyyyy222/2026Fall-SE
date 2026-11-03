@@ -122,13 +122,23 @@ public final class Requests {
       @CodePointLength(min = 1, max = 60) @JsonProperty(required = true) String name,
       @JsonProperty(required = true) UUID categoryId,
       @CodePointLength(max = 500) @JsonProperty(required = true) String description,
-      @NotNull @Size(max = 20) List<@NotNull @Valid SessionDraft> sessions) {}
+      @NotNull @Size(max = 20) List<@NotNull @Valid SessionDraft> sessions,
+      @CodePointLength(min = 1, max = 60) String proposedCategoryName) {
+    public Draft(
+        Long expectedVersion,
+        String name,
+        UUID categoryId,
+        String description,
+        List<SessionDraft> sessions) {
+      this(expectedVersion, name, categoryId, description, sessions, null);
+    }
+  }
 
   public record SessionDraft(
       @NotNull UUID id,
       @CodePointLength(min = 1, max = 60) @JsonProperty(required = true) String name,
-      @BeijingTime(granularity = 3600) @JsonProperty(required = true) OffsetDateTime startsAt,
-      @BeijingTime(granularity = 3600) @JsonProperty(required = true) OffsetDateTime endsAt,
+      @BeijingTime(granularity = 60) @JsonProperty(required = true) OffsetDateTime startsAt,
+      @BeijingTime(granularity = 60) @JsonProperty(required = true) OffsetDateTime endsAt,
       @CodePointLength(min = 1, max = 60) @JsonProperty(required = true) String location,
       @Min(1) @Max(9999) @JsonProperty(required = true) Integer capacity,
       @BeijingTime(granularity = 60) @JsonProperty(required = true) OffsetDateTime salesOpensAt,
@@ -180,6 +190,14 @@ public final class Requests {
       @NotNull @CodePointLength(min = 1, max = 200) String reason,
       @NotNull @CodePointLength(min = 1, max = 2000) String description,
       @NotNull @CodePointLength(min = 1, max = 2000) String evidenceText) {}
+
+  public record RestrictionAppeal(
+      @NotNull UUID restrictionId,
+      @NotNull @CodePointLength(min = 10, max = 1000) String reason,
+      @CodePointLength(max = 2000) String evidenceText) {}
+
+  public record ResolveAppeal(
+      @NotNull AppealStatus decision, @NotNull @CodePointLength(min = 2, max = 1000) String note) {}
 
   public record CreateAccount(
       @NotNull @CodePointLength(min = 1, max = 60) String username,

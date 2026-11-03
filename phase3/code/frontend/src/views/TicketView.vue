@@ -97,7 +97,7 @@ onMounted(load);
           ><RouterLink :to="`/orders/${ticket.orderId}`" class="btn secondary">查看订单</RouterLink>
         </div>
         <p class="field-help" style="margin-top: 18px">
-          电子票仅限本人使用，不支持转赠。系统采用票 id 核验，不生成二维码。
+          电子票仅限本人使用，不能转赠。入场时出示上方票号，由检票员在系统中核对，不需要二维码。
         </p>
       </div>
     </article></template

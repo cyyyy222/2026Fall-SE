@@ -220,6 +220,7 @@ SQL 使用 MySQL 8.4 / InnoDB。当前工程关闭 Flyway、SQL 初始化及自�
 | `name` | `VARCHAR(60)` | Y | 草稿可空 |
 | `category_id` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | Y | 草稿可空 |
 | `category_name_snapshot` | `VARCHAR(60)` | Y | 提交/发布时类别名称 |
+| `proposed_category_name` | `VARCHAR(60)` | Y | 组织者随草稿提出的新类别名称；批准时创建或复用 |
 | `description` | `VARCHAR(500)` | Y | 简介 |
 | `poster_file_id` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | Y | 当前海报 |
 | `submitted_at_ms` | `BIGINT` | Y | 本次提交时刻 |
@@ -250,8 +251,8 @@ SQL 使用 MySQL 8.4 / InnoDB。当前工程关闭 Flyway、SQL 初始化及自�
 | `id` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | N | 前端稳定UUID |
 | `event_id` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | N | 活动 |
 | `name` | `VARCHAR(60)` | Y | 草稿可空，trim后精确比较 |
-| `starts_at_ms` | `BIGINT` | Y | 整小时开始 |
-| `ends_at_ms` | `BIGINT` | Y | 整小时结束 |
+| `starts_at_ms` | `BIGINT` | Y | 按分钟精确开始 |
+| `ends_at_ms` | `BIGINT` | Y | 按分钟精确结束 |
 | `location` | `VARCHAR(60)` | Y | 当前地点，历史票也读此值 |
 | `capacity` | `INT` | Y | 场次容量 |
 | `sales_opens_at_ms` | `BIGINT` | Y | 精确分钟 |
@@ -662,6 +663,9 @@ T2执行记录；失败不使原单/票/库存改变
 | `reason` | `VARCHAR(200)` | N | 原因 |
 | `created_by` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | Y | 核实管理员，系统自动为空 |
 | `ended_message_at_ms` | `BIGINT` | Y | 到期通知补齐标记 |
+| `source` | `VARCHAR(30)` | Y | ADMIN/WEEKLY_ABSENCE/ORGANIZER_AUTO |
+| `source_ref` | `VARCHAR(40)` | Y | 周任务标识等，用于幂等 |
+| `revoked_at_ms` | `BIGINT` | Y | 申诉通过提前撤销时刻；到期仍按ends_at_ms |
 
 约束/索引：
 
@@ -669,6 +673,26 @@ T2执行记录；失败不使原单/票/库存改变
 - `FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT ON UPDATE RESTRICT`
 - `CHECK (ends_at_ms = starts_at_ms + 1296000000)`
 - `KEY ix_restriction_active (phone_identity_id,kind,ends_at_ms,id)`
+
+### restriction_appeals
+
+参与者对15天限制的申诉；同一限制可补充证据再次申诉，但同时只允许一条待审。
+
+| 字段 | MySQL 类型 | 可空 | 说明 |
+| --- | --- | --- | --- |
+| `id` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | N | 申诉UUID |
+| `restriction_id` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | N | 被申诉限制 |
+| `user_id` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | N | 参与者 |
+| `reason` | `VARCHAR(1000)` | N | 申诉理由 |
+| `evidence_text` | `VARCHAR(2000)` | Y | 文字证据 |
+| `status` | `VARCHAR(20)` | N | PENDING/APPROVED/REJECTED |
+| `created_at_ms` | `BIGINT` | N | 提交时刻 |
+| `reviewed_by` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | Y | 审核管理员 |
+| `reviewed_at_ms` | `BIGINT` | Y | 审核时刻 |
+| `decision_note` | `VARCHAR(1000)` | Y | 审核说明 |
+| `version` | `BIGINT` | N | 版本 |
+
+约束/索引：限制/用户/审核人外键；`CHECK (status IN ('PENDING','APPROVED','REJECTED'))`；`KEY ix_appeal_status (status,created_at_ms,id)`、`KEY ix_appeal_user (user_id,created_at_ms,id)`。
 
 ### restriction_facts
 
@@ -1051,6 +1075,7 @@ CREATE TABLE events (
   name VARCHAR(60) NULL,
   category_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
   category_name_snapshot VARCHAR(60) NULL,
+  proposed_category_name VARCHAR(60) NULL,
   description VARCHAR(500) NULL,
   poster_file_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
   submitted_at_ms BIGINT NULL,

@@ -89,6 +89,9 @@ public final class Queries {
   public record Candidates(
       RestrictionKind kind, @Min(1) Integer page, @Min(1) @Max(100) Integer pageSize) {}
 
+  public record RestrictionAppeals(
+      AppealStatus status, @Min(1) Integer page, @Min(1) @Max(100) Integer pageSize) {}
+
   public record Candidate(@NotNull RestrictionKind kind) {}
 
   public record Audit(

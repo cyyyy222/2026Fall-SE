@@ -24,7 +24,17 @@ public final class DomainRules {
   }
 
   public static boolean checkinWindow(long now, long start, long end) {
-    return now >= start - 30 * 60_000L && now < end;
+    return now >= checkinOpen(start) && now < checkinClose(start, end);
+  }
+
+  /** 验票在活动开始前 2 小时开放。 */
+  public static long checkinOpen(long start) {
+    return Math.subtractExact(start, 2 * 3_600_000L);
+  }
+
+  /** 验票在活动进行到一半时结束（结束时刻不含）。 */
+  public static long checkinClose(long start, long end) {
+    return start + Math.max(0, end - start) / 2;
   }
 
   public static double ratio(long numerator, long denominator) {
@@ -41,7 +51,11 @@ public final class DomainRules {
     Set<String> names = new HashSet<>();
     if (complete) {
       valid(
-          draft.name() != null && draft.categoryId() != null && !draft.sessions().isEmpty(),
+          draft.name() != null
+              && (draft.categoryId() != null
+                  || (draft.proposedCategoryName() != null
+                      && !trim(draft.proposedCategoryName()).isEmpty()))
+              && !draft.sessions().isEmpty(),
           "活动信息未完整填写");
     }
     Long earliest = null;

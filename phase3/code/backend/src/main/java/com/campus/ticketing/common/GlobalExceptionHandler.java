@@ -78,7 +78,7 @@ public class GlobalExceptionHandler {
     return result(
         422,
         "VALIDATION_FAILED",
-        "请求字段不合法",
+        "部分字段填写不正确，请按提示修改",
         e.getBindingResult().getFieldErrors().stream()
             .map(
                 f ->
@@ -89,9 +89,34 @@ public class GlobalExceptionHandler {
             .toList());
   }
 
-  @ExceptionHandler({ConstraintViolationException.class, MethodArgumentTypeMismatchException.class})
-  ResponseEntity<ApiErrorResponse> validation(Exception e) {
-    return result(422, "VALIDATION_FAILED", "参数类型或取值不合法", List.of());
+  @ExceptionHandler(ConstraintViolationException.class)
+  ResponseEntity<ApiErrorResponse> constraint(ConstraintViolationException e) {
+    return result(
+        422,
+        "VALIDATION_FAILED",
+        "部分字段填写不正确，请按提示修改",
+        e.getConstraintViolations().stream()
+            .map(
+                v ->
+                    new ApiErrorResponse.FieldError(
+                        v.getPropertyPath().toString(),
+                        v.getConstraintDescriptor()
+                            .getAnnotation()
+                            .annotationType()
+                            .getSimpleName(),
+                        v.getMessage()))
+            .toList());
+  }
+
+  @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+  ResponseEntity<ApiErrorResponse> mismatch(MethodArgumentTypeMismatchException e) {
+    return result(
+        422,
+        "VALIDATION_FAILED",
+        "参数格式不正确",
+        List.of(
+            new ApiErrorResponse.FieldError(
+                e.getName(), "TypeMismatch", "请检查“" + e.getName() + "”的格式或可选值")));
   }
 
   @ExceptionHandler({
@@ -102,11 +127,29 @@ public class GlobalExceptionHandler {
   ResponseEntity<ApiErrorResponse> malformed(Exception e) {
     Throwable cause = e;
     while (cause != null) {
-      if (cause instanceof com.fasterxml.jackson.databind.exc.InvalidFormatException)
-        return result(422, "VALIDATION_FAILED", "字段格式或枚举不合法", List.of());
+      if (cause instanceof com.fasterxml.jackson.databind.exc.InvalidFormatException f) {
+        String field =
+            f.getPath().stream()
+                .map(
+                    ref ->
+                        ref.getFieldName() == null
+                            ? "[" + Objects.requireNonNullElse(ref.getIndex(), 0) + "]"
+                            : ref.getFieldName())
+                .reduce((a, b) -> a + "." + b)
+                .orElse("");
+        return result(
+            422,
+            "VALIDATION_FAILED",
+            "字段格式不正确，请检查类型或可选值",
+            field.isEmpty()
+                ? List.of()
+                : List.of(
+                    new ApiErrorResponse.FieldError(
+                        field, "InvalidFormat", "请填写该字段允许的格式或枚举值")));
+      }
       cause = cause.getCause();
     }
-    return result(400, "MALFORMED_REQUEST", "请求格式无法解析", List.of());
+    return result(400, "MALFORMED_REQUEST", "请求内容无法解析，请检查 JSON 格式和字段名", List.of());
   }
 
   @ExceptionHandler(NoResourceFoundException.class)

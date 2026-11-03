@@ -12,8 +12,8 @@
 
 - JSON 请求/响应使用 UTF-8、camelCase；除上传/下载外 Content-Type 为 `application/json`。
 - ID 为 UUID 字符串，票id也是 UUID 字符串；例子中的 `eventId` 等占位符不代表实际 UUID。
-- 所有时间为带 `+08:00` 偏移的 ISO 8601 字符串，如 `2026-11-05T18:00:00+08:00`。服务端内部使用可注入 Clock；前端不能提交 now/付款金额/库存/状态强行覆盖服务器事实。
-- 场次开始结束仅整小时，放票时间精确到分钟；业务处理时间保留秒及可选毫秒；倒计时不向整分钟取整。
+- 所有时间输入须为带有效时区偏移的 ISO 8601 字符串（推荐 `+08:00`；服务端按绝对时刻处理并统一返回 `+08:00`），秒和毫秒必须为 0。服务端内部使用可注入 Clock；前端不能提交 now/付款金额/库存/状态强行覆盖服务器事实。
+- 场次开始、结束、放票、报名截止均精确到分钟；业务处理时间保留秒及可选毫秒；倒计时不向整分钟取整。
 - 金额统一整数角：单票`priceJiao`及单订单`amountJiao`范围0～9999990；汇总金额不套用单价上限，后端使用64位整数，返回JSON数值须在JavaScript安全整数范围内；前端展示元最多1位小数，不提交浮点元。
 - 字段语法分开定义：`field:T?`表示**字段必须出现但值可为null**；`field?:T`表示**请求可以省略，出现时不得为null**；`field?:T?`表示可省略也可显式清空。未标问号的字段必须出现且不得null。查询参数清单中的`name?`仅表示可省略，不接受字符串`null`。响应可空字段始终出现，不随机省略。
 - JSON对象只返回DTO声明字段，不返回密码、tokenHash、文件系统绝对路径。特殊最小用户投影使用独立的ForcePasswordUser模型，不用省略UserView必填字段表达。
@@ -177,7 +177,8 @@ Page<T>：`{items:T[],page:int,pageSize:int,total:int}`。空查询200且items�
 | Csrf | `token:string,headerName:"X-CSRF-TOKEN"` |
 | UserView | `id:uuid,username:string,role:Role,email:string?,maskedPhone:string?,displayName:string?,mustChangePassword:false,sessionExpiresAt:time,restrictions:RestrictionView[],checkerSessionId:uuid?`；管理员/检票员邮箱手机号可空；强改密另用ForcePasswordUser |
 | ForcePasswordUser | `id:uuid,username:string,role:Role,mustChangePassword:true,sessionExpiresAt:time`；AUTH-02/ME-01响应为UserView或本模型，按mustChangePassword区分 |
-| RestrictionView | `id:uuid,kind:RestrictionKind,startsAt:time,endsAt:time,reason:string` |
+| RestrictionView | `id:uuid,kind:RestrictionKind,startsAt:time,endsAt:time,reason:string,source:string?,active:boolean` |
+| RestrictionAppealView | `id:uuid,restrictionId:uuid,userId:uuid,username:string,reason:string,evidenceText:string?,status:APPROVED或REJECTED或PENDING,createdAt:time,reviewedAt:time?,decisionNote:string?,restriction:RestrictionView` |
 | RegisterInput | `username:string,password:string,email?:string?,phone:string,role:PARTICIPANT或ORGANIZER,verificationId:uuid,verificationCode:string`；六位数字验证码须匹配REGISTER用途、手机号及角色 |
 | RecoveryInput | `account:string,phone:string,role:PARTICIPANT或ORGANIZER,currentPhone:string,statement:string,pastBehavior:string,verificationId:uuid,verificationCode:string`；phone为原号码；陈述/行为各20～2000字；验证当前号码RECOVERY_CONTACT用途；提交不直接重置 |
 | RecoveryReceipt | `requestId:uuid,status:"RECEIVED",message:string`；不透露账号是否存在 |
@@ -194,8 +195,8 @@ Page<T>：`{items:T[],page:int,pageSize:int,total:int}`。空查询200且items�
 | Category | `id:uuid,name:string,enabled:boolean,version:int`；名称trim后1～60字、归一唯一，停用也占名 |
 | TicketTypeDraft | `id:uuid,name:string?,capacity:int?,priceJiao:int?,saleStopped:boolean` |
 | SessionDraft | `id:uuid,name:string?,startsAt:time?,endsAt:time?,location:string?,capacity:int?,salesOpensAt:time?,registrationClosesAt:time?,ticketTypes:TicketTypeDraft[]` |
-| DraftInput | `expectedVersion:int,name:string?,categoryId:uuid?,description:string?,sessions:SessionDraft[]`；聚合整体替换，缺失子对象即从草稿移除；不含poster文件路径 |
-| EventManage | `id:uuid,organizerId:uuid,status:EventStatus,version:int,name:string?,categoryId:uuid?,categoryNameSnapshot:string?,description:string?,posterUrl:string?,sessions:SessionManage[],submittedAt:time?,publishedAt:time?,terminatedAt:time?,terminationReason:string?,lastReviewReason:string?,reviewOverdue:boolean,settlementStatus:SettlementStatus,expiresAt:time?,allowedActions:string[]` |
+| DraftInput | `expectedVersion:int,name:string?,categoryId:uuid?,proposedCategoryName:string?,description:string?,sessions:SessionDraft[]`；`categoryId`与`proposedCategoryName`二选一，提出新类别时必须留空`categoryId`；聚合整体替换，缺失子对象即从草稿移除；不含poster文件路径 |
+| EventManage | `id:uuid,organizerId:uuid,status:EventStatus,version:int,name:string?,categoryId:uuid?,categoryNameSnapshot:string?,proposedCategoryName:string?,description:string?,posterUrl:string?,sessions:SessionManage[],submittedAt:time?,publishedAt:time?,terminatedAt:time?,terminationReason:string?,lastReviewReason:string?,reviewOverdue:boolean,settlementStatus:SettlementStatus,expiresAt:time?,allowedActions:string[]` |
 | SessionManage | SessionDraft字段加 `sessionSalesStatus:SalesStatus?,checkerCount:int`；ticketTypes仍为TicketTypeDraft[]，草稿未填字段保留null。此模型只含活动配置，不含occupied/remaining等订单计数；计数必须通过受保留期保护的MGT-05/06读取 |
 | TicketTypeView | `id:uuid,name:string,capacity:int,priceJiao:int,saleStopped:boolean,occupied:int,remaining:int,salesStatus:SalesStatus` |
 | SessionPublic | `id:uuid,eventId:uuid,eventName:string,categoryId:uuid,categoryNameSnapshot:string,name:string,startsAt:time,endsAt:time,location:string,capacity:int,salesOpensAt:time,registrationClosesAt:time,remaining:int,sessionSalesStatus:SalesStatus,ticketTypes:TicketTypeView[],posterUrl:string?` |
@@ -243,7 +244,7 @@ total返回真实命中数，不截成10000；超过可查询范围时前端提�
 | DTO | 字段 |
 | --- | --- |
 | CheckerContext | `session:SessionPublic,eventStatus:EventStatus,checkinOpensAt:time,checkinClosesAt:time,allowedActions:string[]` |
-| TicketPreview | `ticketId:uuid,attendeeName:string,sessionId:uuid,sessionName:string,ticketTypeName:string,ticketStatus:TicketStatus,alreadyChecked:boolean,checkedAt:time?,canConfirm:boolean` |
+| TicketPreview | `ticketId:uuid,userId:uuid,username:string,attendeeName:string,phone:string?,sessionId:uuid,sessionName:string,ticketTypeName:string,ticketStatus:TicketStatus,alreadyChecked:boolean,checkedAt:time?,canConfirm:boolean` |
 | CheckInResult | `ticketId:uuid,orderId:uuid,checkedAt:time,checkerId:uuid,sessionId:uuid,replayed:boolean,orderStatus:OrderStatus,ticketStatus:TicketStatus`；只返回当前授权范围内数据 |
 | AttendeeRow | `attendeeName:string,sessionId:uuid,sessionName:string,ticketTypeId:uuid,ticketTypeName:string,orderStatus:OrderStatus,checkinStatus:NOT_CHECKED或CHECKED,ticketId:uuid?`；无手机号/邮箱/支付记录 |
 | ExportView | `id:uuid,eventId:uuid,status:ExportStatus,rowCount:int?,createdAt:time,expiresAt:time?,downloadUrl:string?,failureReason:string?`；活动未终结时expiresAt=null，终结后按统一边界动态计算，下载仍复核 |
@@ -317,11 +318,11 @@ total返回真实命中数，不截成10000；超过可查询范围时前端提�
 | ME-07 | GET `/me/orders` | P | `status?,eventId?,page?,pageSize?` → Page<OrderView> | createdAt desc,id asc；包括终态及已非公开活动本人摘要，不提供别人名单 |
 | ME-08 | GET `/me/orders/{orderId}` | P本人 | path → OrderView | 最新状态/期限/可用动作；用于响应丢失恢复 |
 | ME-09 | GET `/me/registration-requests/{requestId}` | P本人 | path → RegistrationResult | 查原报名键；无持久受理记录404；未知结果时也可用原键重放ME-06 |
-| ME-10 | POST `/me/orders/{orderId}/cancel` | P本人 | `{reason:string?}` → Mutation<OrderView> | 只WAITLISTED/OFFERED/UNPAID且截止前；释放与消息同事务；REGISTERED必须走退款 |
+| ME-10 | POST `/me/orders/{orderId}/cancel` | P本人 | `{reason:string?}` → Mutation<OrderView> | 只WAITLISTED/OFFERED/UNPAID且验票结束前；释放与消息同事务；REGISTERED必须走退款 |
 | ME-11 | GET `/me/orders/{orderId}/queue` | P本人 | path → QueueView | 当前位次仅WAITLISTED；其他状态position=null；不返回其他人数据 |
-| ME-12 | POST `/me/orders/{orderId}/promotion-confirmation` | P本人 | `{}` → Mutation<OrderView> | OFFERED且now<确认/报名截止；沿用占位，起算15分钟支付；拒绝递补用ME-10 |
+| ME-12 | POST `/me/orders/{orderId}/promotion-confirmation` | P本人 | `{}` → Mutation<OrderView> | OFFERED且now<确认截止；确认截止=min(通知+12小时,验票结束)，确认后支付截止=min(确认+15分钟,验票结束)；拒绝递补用ME-10 |
 
-普通支付截止=min(新单提交时间+15分钟,报名截止)；递补确认截止=min(通知持久化+12小时,报名截止)。被报名锁定者不得新报名/候补，但既有OFFERED/UNPAID可继续履约。无合格候补时才允许新用户取得名额。
+普通支付截止=min(新单提交时间+15分钟,报名截止)；候补递补确认截止=min(通知持久化+12小时,验票结束)，确认后支付截止=min(确认时刻+15分钟,验票结束)。候补未递补、已递补未确认或已确认未支付，均在验票结束时失效。被报名锁定者不得新报名/候补，但既有OFFERED/UNPAID可继续履约。无合格候补时才允许新用户取得名额。
 
 ### 4.4 支付与退款（payment）
 
@@ -363,7 +364,7 @@ ME-13同order+attempt重放返回原attempt和最新order；不同attempt但已�
 | ORG-04 | PUT `/organizer/events/{eventId}/draft` | O归属 | DraftInput → Mutation<EventManage> | DRAFT整体保存；允许不完整；稳定子ID；拒绝非整点；场次删除处理授权见3.2 |
 | ORG-05 | PUT `/organizer/events/{eventId}/poster` | O归属 | multipart `file,expectedVersion` → Mutation<EventManage> | DRAFT/PUBLISHED未整体结束；JPEG/PNG≤5,000,000字节；服务端识别真实格式并限制解码像素≤40,000,000（本轮实现上限），失败保留旧图 |
 | ORG-06 | DELETE `/organizer/events/{eventId}/poster` | O归属 | query `expectedVersion` → Mutation<EventManage> | 同可编辑条件；删除关联，不暴露文件系统地址 |
-| ORG-07 | POST `/organizer/events/{eventId}/submission` | O归属 | `{expectedVersion}` → Mutation<EventManage> | 校验完整性/时间/排期/有效类别，更新提交类别快照；不要求草稿编辑时就完整 |
+| ORG-07 | POST `/organizer/events/{eventId}/submission` | O归属 | `{expectedVersion}` → Mutation<EventManage> | 校验完整性/时间/排期/有效类别或建议新类别，更新提交类别快照；不要求草稿编辑时就完整 |
 | ORG-08 | POST `/organizer/events/{eventId}/withdrawal` | O归属 | `{expectedVersion}` → Mutation<EventManage> | 仅PENDING_REVIEW；与审核并发仅一方成功 |
 | ORG-09 | PATCH `/organizer/events/{eventId}/published-settings` | O归属 | PublishedEdit → Mutation<EventManage> | 只允许未结束场次白名单字段、活动简介；整体容量校验；地点/容量变更给受影响有效单持久通知；不得修改已结束场次 |
 | ORG-10 | POST `/organizer/events/{eventId}/cancellation` | O归属 | `{expectedVersion,reason:string}` → TerminationResult | 202；reason1～200字；首场前且全活动无签到；终止立即生效 |
@@ -375,8 +376,8 @@ ME-13同order+attempt重放返回原attempt和最新order；不同attempt但已�
 
 | 编号 | 方法与路径 | 权限 | 输入 → 输出 | 特有规则 |
 | --- | --- | --- | --- | --- |
-| CHK-01 | GET `/checker/context` | C | 无 → CheckerContext | 从会话授权取场次；客户端不能通过参数选择另一场 |
-| CHK-02 | POST `/checker/ticket-previews` | C | `{ticketId:uuid}` → TicketPreview | 200只核对；先鉴权与当前授权再返回姓名；未签到须票有效/窗口/活动有效 |
+| CHK-01 | GET `/checker/context` | C | 无 → CheckerContext | 从会话授权取场次；客户端不能通过参数选择另一场；验票窗口为活动开始前2小时至活动进行到一半 |
+| CHK-02 | POST `/checker/ticket-previews` | C | `{ticketId:uuid}` → TicketPreview | 200只核对；先鉴权与当前授权再返回用户名、姓名、手机号、用户ID与票号；未签到须票有效/窗口/活动有效 |
 | CHK-03 | POST `/checker/checkins` | C | `{ticketId:uuid}` → CheckInResult | 201首次，200重复；确认时重查，不信preview；票唯一签到 |
 | CHK-04 | POST `/checker/sessions/{sessionId}/absence-reconciliation` | C当前授权 | `{}` → `{sessionId,processedCount:int,alreadyProcessedCount:int,settlementStatus}` | 200；只在正常结束后且账号仍有效；幂等补漏，不改已退款/取消/签到，不提前标缺席 |
 
@@ -401,12 +402,16 @@ MGT-03/04允许管理员按明确exportId查看/下载，O必须当前仍归属�
 
 | 编号 | 方法与路径 | 权限 | 输入 → 输出 | 特有规则 |
 | --- | --- | --- | --- | --- |
-| ME-21 | POST `/me/reports` | P | ReportInput → ReportView | 201；已发布场次可无票举报；终态活动仅有关本人历史入口；同人同场唯一，滚动30天最多5次 |
-| ME-22 | GET `/me/reports` | P | `status?,page?,pageSize?` → Page<ReportView> | 仅本人；createdAt desc,id asc；驳回不返额不允许重报 |
+| ME-21 | POST `/me/reports` | P | ReportInput → ReportView | 201；公开活动可无票举报；结束后7天内且本人有该活动订单；同一参与者同一活动唯一；不设月度业务上限，保留24小时技术频率保护 |
+| ME-22 | GET `/me/reports` | P | `status?,page?,pageSize?` → Page<ReportView> | 仅本人；createdAt desc,id asc；同一活动不重复受理 |
 | ME-23 | GET `/me/reports/{reportId}` | P本人 | path → ReportView | 不泄露其他举报人的身份或内容 |
 | ME-24 | GET `/me/messages` | U | `unreadOnly=false,page?,pageSize?` → Page<MessageView> | 本人且未满180天；createdAt desc,id asc；逻辑过期过滤 |
 | ME-25 | GET `/me/messages/{messageId}` | U本人 | path → MessageView | 详情不自动已读；已过期410 |
 | ME-26 | POST `/me/messages/{messageId}/read` | U本人 | `{}` → Mutation<MessageView> | 已读幂等，保留首次readAt，不延长确认期限 |
+| ME-28 | GET `/me/restrictions` | P | 无 → RestrictionView[] | 本人手机号身份下的报名限制，含来源、起止与是否生效 |
+| ME-29 | GET `/me/restriction-appeals` | P | 无 → RestrictionAppealView[] | 本人申诉记录，createdAt desc,id asc |
+| ME-30 | POST `/me/restriction-appeals` | P本人 | `{restrictionId,reason,evidenceText?}` → RestrictionAppealView | 201；仅本人有效报名限制；同一限制同时只允许一条待审，可补充证据再次申诉 |
+| ME-31 | GET `/me/messages/unread-count` | U | 无 → `{count:int}` | 仅统计未过期且未读消息 |
 
 ### 4.10 管理员账号与人工找回（account）
 
@@ -414,7 +419,7 @@ MGT-03/04允许管理员按明确exportId查看/下载，O必须当前仍归属�
 | --- | --- | --- | --- | --- |
 | ADM-01 | GET `/admin/accounts` | A | `role?,username?,eventId?,sessionId?,enabled?,page?,pageSize?` → Page<ManagedAccount> | username规范化包含匹配；createdAt desc,id asc；不返回密码/会话token |
 | ADM-02 | POST `/admin/accounts` | A | `{username,initialPassword,role:ADMIN或CHECKER,sessionId?:uuid}` → ManagedAccount | 201；C必绑已存在场次，A不得绑场次；C仅可配置待审/已发布未结束场次；所有新A强改密 |
-| ADM-03 | PATCH `/admin/accounts/{accountId}` | A | `{expectedVersion,enabled?:boolean,assignedSessionId?:uuid}` → Mutation<ManagedAccount> | 仅管理A/C停用/启用，只有C可改绑且同活动未结束；末个可用账号保护；停用/改绑撤销旧会话 |
+| ADM-03 | PATCH `/admin/accounts/{accountId}` | A | `{expectedVersion,enabled?:boolean,assignedSessionId?:uuid}` → Mutation<ManagedAccount> | 仅管理A/C停用/启用，只有C可改绑到待审/已发布未结束场次（可跨活动）；末个可用账号保护；停用/改绑撤销旧会话 |
 | ADM-04 | DELETE `/admin/accounts/{accountId}` | A | query `expectedVersion` → Mutation<ManagedAccount> | 仅逻辑删除管理员/检票账号；末个检票保护；不删历史；为可运维性拒绝删除/停用最后一个可用管理员 |
 | ADM-05 | POST `/admin/accounts/{accountId}/password-reset` | A | `{initialPassword,reason,recoveryRequestId?:uuid}` → `{accountId,reset:true,mustChangePassword:true}` | 所有重置撤销会话；P/O必须有VERIFIED且targetAccountId匹配、当前号码已验证码验证的完整申诉；同事务换绑、重置及提交后本地短信通知；禁止重置已删除或因活动终止失效的C；不恢复账号 |
 | ADM-06 | GET `/admin/recoveries` | A | `status?,page?,pageSize?` → Page<RecoveryView> | 人工核验请求列表；createdAt asc,id asc |
@@ -430,7 +435,7 @@ VERIFIED之前必须确认targetAccountId存在、未删除，且登记手机号
 | --- | --- | --- | --- | --- |
 | ADM-08 | GET `/admin/reviews` | A | `overdueOnly=false,page?,pageSize?` → ReviewQueue | 仅待审；submittedAt asc,id asc；24小时超期标记，不自动通过 |
 | ADM-09 | GET `/admin/events/{eventId}` | A | path → EventManage | 审核/治理所需元数据；不能从中获取过期名单或报表 |
-| ADM-10 | POST `/admin/events/{eventId}/approval` | A | `{expectedVersion}` → ReviewResult | 全条件重查；成功PUBLISHED，额度原子扣一次；条件失效提交RETURNED_TO_DRAFT原因 |
+| ADM-10 | POST `/admin/events/{eventId}/approval` | A | `{expectedVersion}` → ReviewResult | 全条件重查；批准时若活动只有建议新类别则自动创建或复用同名类别并归入本活动；成功PUBLISHED，额度原子扣一次；条件失效提交RETURNED_TO_DRAFT原因 |
 | ADM-11 | POST `/admin/events/{eventId}/rejection` | A | `{expectedVersion,reason:string}` → ReviewResult | reason1～200字必填；退草稿并通知组织者 |
 | ADM-12 | GET `/admin/categories` | A | `enabled?,page?,pageSize?` → Page<Category> | 包括停用；name规范化asc,id asc |
 | ADM-13 | POST `/admin/categories` | A | `{name:string}` → Category | 201；同规范化名称唯一，停用也占名 |
@@ -457,6 +462,8 @@ ADM-10不因缺检票账号而自动创建；前端引导先ADM-02配置。发�
 | ADM-27 | GET `/admin/jobs/{jobId}` | A | path → JobView | 不暴露任意任务执行/直接改状态入口，重试由内部持久执行器完成 |
 | ADM-28 | GET `/admin/events` | A | `status?,name?,organizerId?,page?,pageSize?` → Page<EventManage> | 所有活动元数据检索，updatedAt desc,id asc；name包含匹配；不含参与者名单/支付明细/聚合统计，历史活动仍可定位但短期数据到期拒绝 |
 | ADM-29 | GET `/admin/restriction-candidates/{phoneIdentityId}` | A | query `kind=REGISTER或PUBLISH`必填 → RestrictionEvidence | 单身份可跨注销关联不同角色历史，必须明确kind；仅当前窗口及相关边界的核实依据，ADM-23写时重算 |
+| ADM-32 | GET `/admin/restriction-appeals` | A | `status?,page?,pageSize?` → Page<RestrictionAppealView> | createdAt desc,id asc；含账号、限制依据、申诉理由与证据 |
+| ADM-33 | POST `/admin/restriction-appeals/{appealId}/resolution` | A | `{decision:APPROVED或REJECTED,note:string}` → RestrictionAppealView | 仅PENDING；APPROVED立即撤销限制并通知；保存审核人、时间与说明；不删除历史 |
 | ADM-30 | GET `/admin/investigations` | A | `eventId?,conclusion?,page?,pageSize?` → Page<InvestigationResult> | createdAt desc,id asc；供核查历史列表定位ADM-21详情，不能按其重建参与者名单 |
 | ADM-31 | GET `/admin/refund-requests` | A | `status?,source?,orderId?,page?,pageSize?` → Page<RefundRequest> | acceptedAt asc,id asc；仅有合法依据的退款排障队列；批量限未过短期保留期活动，明确orderId仅该单历史；已知requestId走ADM-17 |
 

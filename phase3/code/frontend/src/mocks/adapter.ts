@@ -200,20 +200,26 @@ function ownOrder(id: string) {
   if (order.userId !== u.id) fail('OBJECT_FORBIDDEN', '只能访问本人的订单', 403);
   return order;
 }
+function checkinCloseAt(session: Session) {
+  const start = Date.parse(session.startsAt);
+  return start + Math.max(0, Date.parse(session.endsAt) - start) / 2;
+}
 function orderView(order: StoredOrder): Order {
   const event = eventById(order.event.eventId);
   const session = event.sessions.find((s) => s.id === order.event.sessionId);
   const open =
     !!session && Date.now() < Date.parse(session.registrationClosesAt) && !terminated(event);
+  const pendingOpen = !!session && Date.now() < checkinCloseAt(session) && !terminated(event);
   const actions: string[] = [];
   if (
-    open &&
+    pendingOpen &&
     order.status === 'UNPAID' &&
     (!order.payDeadline || Date.now() < Date.parse(order.payDeadline))
   )
     actions.push('PAY');
-  if (open && order.status === 'OFFERED') actions.push('CONFIRM_PROMOTION');
-  if (open && ['WAITLISTED', 'OFFERED', 'UNPAID'].includes(order.status)) actions.push('CANCEL');
+  if (pendingOpen && order.status === 'OFFERED') actions.push('CONFIRM_PROMOTION');
+  if (pendingOpen && ['WAITLISTED', 'OFFERED', 'UNPAID'].includes(order.status))
+    actions.push('CANCEL');
   if (open && order.status === 'REGISTERED') actions.push('REQUEST_REFUND');
   if (order.ticketId) actions.push('VIEW_TICKET', 'DOWNLOAD_TICKET');
   actions.push('REPORT');
@@ -366,11 +372,7 @@ function ticket(order: StoredOrder): Ticket {
 function promote() {
   for (const event of db.events.filter((e) => e.status === 'PUBLISHED' && !terminated(e)))
     for (const s of event.sessions) {
-      if (
-        Date.now() < Date.parse(s.salesOpensAt) ||
-        Date.now() >= Date.parse(s.registrationClosesAt)
-      )
-        continue;
+      if (Date.now() < Date.parse(s.salesOpensAt) || Date.now() >= checkinCloseAt(s)) continue;
       for (const type of decorate(event).sessions.find((x) => x.id === s.id)!.ticketTypes) {
         if (type.saleStopped) continue;
         let left = type.remaining;
@@ -388,7 +390,7 @@ function promote() {
             continue;
           o.status = 'OFFERED';
           o.confirmDeadline = new Date(
-            Math.min(Date.now() + 12 * 3600000, Date.parse(s.registrationClosesAt)),
+            Math.min(Date.now() + 12 * 3600000, checkinCloseAt(s)),
           ).toISOString();
           o.queuePosition = null;
           message(
@@ -410,7 +412,12 @@ function tick() {
         o.confirmDeadline &&
         Date.now() >= Date.parse(o.confirmDeadline)) ||
       (['WAITLISTED', 'OFFERED', 'UNPAID'].includes(o.status) &&
-        Date.now() >= Date.parse(o.event.startsAt))
+        Date.now() >=
+          checkinCloseAt(
+            db.events
+              .find((e) => e.id === o.event.eventId)!
+              .sessions.find((s) => s.id === o.event.sessionId)!,
+          ))
     ) {
       o.status = 'CANCELLED';
       o.statusReason = '超过操作截止时间';
@@ -424,13 +431,15 @@ function validateVersion(event: CampusEvent, value: unknown) {
 function validateDraft(event: CampusEvent) {
   if (
     !event.name.trim() ||
-    !event.categoryId ||
+    (!event.categoryId && !event.proposedCategoryName?.trim()) ||
     !event.sessions.length ||
     event.sessions.length > 20
   )
-    fail('VALIDATION_FAILED', '请填写活动名称、有效类别，并添加1～20个场次', 422);
-  const category = db.categories.find((c) => c.id === event.categoryId && c.enabled);
-  if (!category) fail('VALIDATION_FAILED', '请选择有效类别', 422);
+    fail('VALIDATION_FAILED', '请填写活动名称、有效类别或新类别，并添加1～20个场次', 422);
+  const category = event.categoryId
+    ? db.categories.find((c) => c.id === event.categoryId && c.enabled)
+    : null;
+  if (event.categoryId && !category) fail('VALIDATION_FAILED', '请选择有效类别', 422);
   for (const s of event.sessions) {
     if (
       !s.name ||
@@ -1274,9 +1283,12 @@ export async function mockRequest<T>(
         if (event.status !== 'DRAFT') fail('STATE_CONFLICT', '只有草稿可以编辑');
         event.name = text('name');
         event.description = text('description');
-        event.categoryId = text('categoryId');
+        event.categoryId = text('categoryId') || '';
+        event.proposedCategoryName = text('proposedCategoryName') || null;
         event.categoryNameSnapshot =
-          db.categories.find((c) => c.id === event.categoryId)?.name || '';
+          db.categories.find((c) => c.id === event.categoryId)?.name ||
+          event.proposedCategoryName ||
+          '';
         event.sessions = ((body.sessions as Session[]) || []).map((s) => ({
           ...s,
           eventId: id,
@@ -1336,8 +1348,11 @@ export async function mockRequest<T>(
         return {
           session: decorate(event).sessions.find((s) => s.id === session.id),
           eventStatus: event.status,
-          checkinOpensAt: new Date(Date.parse(session.startsAt) - 1800000).toISOString(),
-          checkinClosesAt: session.endsAt,
+          checkinOpensAt: new Date(Date.parse(session.startsAt) - 2 * 3600000).toISOString(),
+          checkinClosesAt: new Date(
+            Date.parse(session.startsAt) +
+              (Date.parse(session.endsAt) - Date.parse(session.startsAt)) / 2,
+          ).toISOString(),
           allowedActions: [],
         };
       if (p.endsWith('/absence-reconciliation')) {
@@ -1355,6 +1370,7 @@ export async function mockRequest<T>(
         fail('RESOURCE_NOT_FOUND', '票号不存在，请检查输入', 404);
       if (o.event.sessionId !== user.assignedSessionId)
         fail('OBJECT_FORBIDDEN', '此票不属于当前授权场次', 403);
+      const attendee = db.accounts.find((a) => a.id === o.userId);
       if (o.checkedAt)
         return p.endsWith('/checkins')
           ? {
@@ -1369,7 +1385,10 @@ export async function mockRequest<T>(
             }
           : {
               ticketId: o.ticketId,
+              userId: o.userId,
+              username: attendee?.username || '—',
               attendeeName: o.attendeeNameSnapshot,
+              phone: attendee?.phone || null,
               sessionId: session.id,
               sessionName: session.name,
               ticketTypeName: o.ticketTypeName,
@@ -1379,13 +1398,21 @@ export async function mockRequest<T>(
               canConfirm: false,
             };
       if (o.status !== 'REGISTERED') fail('TICKET_INVALID', '电子票已失效');
-      if (Date.now() < Date.parse(session.startsAt) - 1800000)
-        fail('CHECKIN_NOT_OPEN', '尚未到验票窗口：场次开始前30分钟开放');
-      if (Date.now() >= Date.parse(session.endsAt)) fail('CHECKIN_ENDED', '该场次已结束');
+      const checkinOpen = Date.parse(session.startsAt) - 2 * 3600000;
+      const checkinClose =
+        Date.parse(session.startsAt) +
+        (Date.parse(session.endsAt) - Date.parse(session.startsAt)) / 2;
+      if (Date.now() < checkinOpen)
+        fail('CHECKIN_NOT_OPEN', '尚未到验票窗口：活动开始前 2 小时开放');
+      if (Date.now() >= checkinClose)
+        fail('CHECKIN_ENDED', '验票窗口已结束：活动进行到一半时停止验票');
       if (p.endsWith('/ticket-previews'))
         return {
           ticketId: o.ticketId,
+          userId: o.userId,
+          username: attendee?.username || '—',
           attendeeName: o.attendeeNameSnapshot,
+          phone: attendee?.phone || null,
           sessionId: session.id,
           sessionName: session.name,
           ticketTypeName: o.ticketTypeName,
@@ -1614,6 +1641,16 @@ export async function mockRequest<T>(
         validateVersion(event, body.expectedVersion);
         if (p.endsWith('/approval')) {
           if (event.status !== 'PENDING_REVIEW') fail('STATE_CONFLICT', '活动已不在待审核状态');
+          if (!event.categoryId && event.proposedCategoryName?.trim()) {
+            const name = event.proposedCategoryName.trim();
+            let category = db.categories.find((c) => c.name === name);
+            if (!category) {
+              category = { id: uid(), name, enabled: true, version: 1 };
+              db.categories.push(category);
+            }
+            event.categoryId = category.id;
+            event.categoryNameSnapshot = name;
+          }
           validateDraft(event);
           const noChecker = event.sessions.some(
             (s) =>
@@ -1767,11 +1804,14 @@ export async function mockRequest<T>(
           )
             fail('LAST_CHECKER_REQUIRED', '请先配置替代检票员，不能移走最后一个可用账号');
         }
-        if (body.assignedSessionId && a.assignedSessionId) {
-          const oldEvent = sessionById(a.assignedSessionId).event;
+        if (body.assignedSessionId) {
           const target = sessionById(text('assignedSessionId'));
-          if (target.event.id !== oldEvent.id || Date.parse(target.session.endsAt) <= Date.now())
-            fail('VALIDATION_FAILED', '仅能改绑同活动未结束场次', 422);
+          if (
+            (target.event.status !== 'PENDING_REVIEW' && target.event.status !== 'PUBLISHED') ||
+            terminated(target.event) ||
+            Date.parse(target.session.endsAt) <= Date.now()
+          )
+            fail('VALIDATION_FAILED', '只能改绑到待审核或已发布且尚未结束的场次', 422);
         }
         if (method === 'DELETE') {
           a.deletedAt = now();

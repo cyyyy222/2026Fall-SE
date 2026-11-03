@@ -100,7 +100,7 @@ class FrameworkContractTest {
                               .forEach(
                                   method -> actual.add(contract.id() + " " + method + " " + path)));
             });
-    assertThat(expected).hasSize(93);
+    assertThat(expected).hasSize(99);
     assertThat(actual).isEqualTo(expected);
   }
 
@@ -224,7 +224,19 @@ class FrameworkContractTest {
             null,
             null,
             List.of());
-    assertThat(validator.validate(draft)).isNotEmpty();
+    assertThat(validator.validate(draft)).isEmpty();
+    var seconds =
+        new Requests.SessionDraft(
+            UUID.randomUUID(),
+            null,
+            OffsetDateTime.parse("2026-11-05T18:01:30+08:00"),
+            null,
+            null,
+            null,
+            null,
+            null,
+            List.of());
+    assertThat(validator.validate(seconds)).isNotEmpty();
     var zone =
         new Requests.SessionDraft(
             UUID.randomUUID(),
@@ -236,7 +248,7 @@ class FrameworkContractTest {
             null,
             null,
             List.of());
-    assertThat(validator.validate(zone)).isNotEmpty();
+    assertThat(validator.validate(zone)).isEmpty();
     var valid =
         json.readValue(
             "{\"id\":\""

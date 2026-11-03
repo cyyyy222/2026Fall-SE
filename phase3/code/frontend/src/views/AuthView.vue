@@ -67,7 +67,7 @@ async function sendCode() {
     verificationCode.value = '';
     clockNow.value = Date.now();
     resendAt.value = Date.now() + receipt.resendAfterSeconds * 1000;
-    app.toast('验证码已输出到本地Java后端终端，有效期5分钟');
+    app.toast('验证码已生成，请在后端终端查看（本地演示，不会发送短信），5分钟内有效');
   });
 }
 function phoneInput(purpose: 'LOGIN' | 'REGISTER') {
@@ -246,7 +246,8 @@ async function submit() {
             />
           </div>
           <p v-if="mode === 'register'" class="field-help">
-            同一手机号可分别注册一个参与者账号和一个组织者账号；同角色内不能重复。用户名须唯一；邮箱可留空，填写时不得与其他有效账号重复。
+            同一个手机号可以分别注册 1 个参与者账号和 1 个组织者账号，但同一角色只能有 1
+            个。用户名在所有账号中不能重复；邮箱可以不填，填了也不能和其他账号重复。
           </p>
           <div
             v-if="mode === 'register' || (mode === 'login' && loginMethod === 'phone')"
@@ -273,7 +274,10 @@ async function submit() {
                 {{ resendSeconds ? `${resendSeconds}秒后重发` : '获取验证码' }}
               </button>
             </div>
-            <small>本地联调：验证码输出在Java后端终端，不会真正发送短信。</small>
+            <small
+              >本地演示：验证码不会真的发短信，会显示在后端终端或 backend-local.log 中，5
+              分钟内有效。</small
+            >
             <p v-if="codeTask.error.value" class="error-inline" role="alert">
               {{ codeTask.error.value }}
             </p>
@@ -324,7 +328,7 @@ async function submit() {
             />
           </div>
           <div v-if="mode === 'login'" class="auth-links">
-            <span>登录后固定7天有效</span><RouterLink to="/recover">忘记密码？</RouterLink>
+            <span>登录后 7 天内有效</span><RouterLink to="/recover">忘记密码？</RouterLink>
           </div>
           <p v-if="task.error.value" class="error-inline" role="alert">{{ task.error.value }}</p>
           <button class="btn primary full" :disabled="task.busy.value">
@@ -345,7 +349,7 @@ async function submit() {
         <div v-if="mode === 'login' && (isMock || showHttpDemos)" class="auth-demo">
           <div class="auth-demo-title">
             <span>选择演示账号，填入登录信息</span
-            ><span>{{ isMock ? '本地模拟' : '真实接口 · 本机演示' }}</span>
+            ><span>{{ isMock ? '本地模拟' : '本机联调 · 演示账号' }}</span>
           </div>
           <div class="demo-accounts">
             <button
@@ -371,7 +375,7 @@ async function submit() {
         当前为前端演示，信息仅保存在本机浏览器。请使用演示资料，不要输入真实密码或个人信息。
       </p>
       <p v-else-if="showHttpDemos" class="auth-safety">
-        当前通过 Java 后端读写
+        当前为本机联调环境，数据保存在
         MySQL。支付为本地模拟，不会实际扣款；管理员修改口令后请手动填写新口令。
       </p>
     </div>
@@ -382,12 +386,12 @@ async function submit() {
     @close="duplicateAccount = false"
   >
     <p>
-      你已验证这个手机号。当前{{
+      这个手机号已经有一个{{
         fields.role === 'ORGANIZER' ? '组织者' : '参与者'
-      }}身份已有账号，不能重复注册；如果是你的账号，可以直接登录。
+      }}账号，同一角色不能重复注册。如果这是你的账号，可以直接登录。
     </p>
     <p class="field-help">
-      如果不是你的账号，请联系平台工作人员核实手机号归属，不能覆盖或删除原账号。另一种身份仍可单独注册。
+      如果不是你的账号，请联系平台工作人员核实手机号归属；平台不会覆盖或删除原账号。另一种身份仍可单独注册。
     </p>
     <p v-if="task.error.value" class="error-inline">{{ task.error.value }}</p>
     <div class="button-row">

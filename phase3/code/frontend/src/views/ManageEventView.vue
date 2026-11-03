@@ -96,7 +96,7 @@ onMounted(load);
     ><PageHeading
       eyebrow="EVERY DETAIL MAKES A DIFFERENCE"
       :title="admin ? '活动审核与管理' : '活动管理'"
-      description="活动生命周期、最新配置和业务入口。"
+      description="查看活动状态、最新配置和业务入口。"
       ><StatusBadge :status="event.status" /><button class="btn secondary small" @click="load">
         <AppIcon name="RefreshCw" :size="14" />刷新
       </button></PageHeading
@@ -118,6 +118,8 @@ onMounted(load);
           <h2>{{ event.name || '未命名草稿' }}</h2>
           <div class="detail-tags">
             <span class="tag">{{ event.categoryNameSnapshot || '类别待完善' }}</span
+            ><span v-if="event.proposedCategoryName && !event.categoryId" class="tag"
+              >建议新类别：{{ event.proposedCategoryName }}</span
             ><span class="tag">{{ event.sessions.length }}个场次</span>
           </div>
           <p class="field-help">
@@ -134,7 +136,7 @@ onMounted(load);
     <div v-if="event.status === 'PUBLISHED' && counts" class="stat-grid" style="margin-top: 23px">
       <div
         v-for="item in [
-          ['当前占位', counts.occupied],
+          ['已占名额', counts.occupied],
           ['可分配余票', counts.remaining],
           ['当前候补', counts.currentWaitlist],
           ['已签到', counts.checkedIn],
@@ -218,7 +220,12 @@ onMounted(load);
       <div class="alert info">
         <AppIcon name="ShieldCheck" />
         <p>
-          通过即发布；发布时将重新检查类别、时间、排期、额度和每场检票账号。条件失效会说明原因退回草稿。
+          通过后活动立即发布。发布前会重新检查类别、时间、排期、名额和每场检票账号；条件不满足时会说明原因并退回草稿。
+        </p>
+        <p v-if="event.proposedCategoryName && !event.categoryId" style="margin-top: 8px">
+          该活动建议新类别「{{
+            event.proposedCategoryName
+          }}」。审核通过时会自动创建（或复用同名类别）并归入该类别。
         </p>
       </div>
       <div class="button-row" style="margin-top: 20px">
@@ -318,7 +325,7 @@ onMounted(load);
         </div>
       </div>
       <p class="field-help">
-        缩容不能低于已占名额；扩容时优先递补合格候补。地点、容量变更通知受影响用户。
+        容量不能改到低于已占用的人数；增加容量时会优先通知排队的候补。地点和容量变化会通知受影响的报名者。
       </p>
       <div class="button-row">
         <button class="btn secondary" type="button" @click="modal = null">取消</button
@@ -333,8 +340,8 @@ onMounted(load);
       <p class="field-help">
         {{
           modal === 'cancel'
-            ? '仅首场开始前且全活动没有签到时允许取消。生效后立即拒绝新交易与验票，并处理存量订单。终态不可恢复。'
-            : '请填写组织者可见的明确理由，活动将返回草稿。'
+            ? '只有在首场开始前、且还没有人签到时才能取消。取消后立即停止新的报名和验票，并处理已有订单，且不能恢复。'
+            : '请填写组织者可见的明确理由，活动将退回草稿。'
         }}
       </p>
       <div class="form-field" style="margin-top: 20px">

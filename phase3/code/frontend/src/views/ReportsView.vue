@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { get, post } from '../api/client';
-import type { Page, Report, Session } from '../types';
+import type { Order, Page, Report, Session } from '../types';
 import { dateTime } from '../utils/format';
 import { useTask } from '../composables/useTask';
 import PageHeading from '../components/PageHeading.vue';
@@ -13,7 +13,7 @@ import AppIcon from '../components/AppIcon.vue';
 const route = useRoute();
 const task = useTask();
 const reports = ref<Report[]>([]);
-const sessions = ref<Session[]>([]);
+const sessions = ref<{ id: string; eventName: string; name: string }[]>([]);
 const loading = ref(true);
 const error = ref('');
 const show = ref(route.params.action === 'new');
@@ -28,7 +28,23 @@ async function load() {
   error.value = '';
   try {
     reports.value = (await get<Page<Report>>('/me/reports?pageSize=100')).items;
-    sessions.value = (await get<Page<Session>>('/public/sessions?pageSize=100')).items;
+    const publicSessions = (await get<Page<Session>>('/public/sessions?pageSize=100')).items;
+    const orders = (await get<Page<Order>>('/me/orders?pageSize=100')).items;
+    const options = new Map<string, { id: string; eventName: string; name: string }>();
+    for (const session of publicSessions)
+      options.set(session.id, {
+        id: session.id,
+        eventName: session.eventName,
+        name: session.name,
+      });
+    for (const order of orders)
+      if (!options.has(order.event.sessionId))
+        options.set(order.event.sessionId, {
+          id: order.event.sessionId,
+          eventName: order.event.eventName,
+          name: order.event.sessionName,
+        });
+    sessions.value = [...options.values()];
   } catch (e) {
     error.value = e instanceof Error ? e.message : '无法读取举报';
   } finally {
@@ -56,7 +72,8 @@ onMounted(load);
   <div class="alert info" style="margin-bottom: 24px">
     <AppIcon name="ShieldCheck" />
     <p>
-      同人同场最多一次，连续30天最多受理5次。驳回不返次数；支持文字证据或链接，不上传或自动抓取附件。
+      同一参与者对同一活动最多举报 1 次；活动结束后 7
+      天内、且本人参加过该活动时仍可举报。证据请用文字或链接，暂不支持上传附件；系统仅做必要的频率保护。
     </p>
   </div>
   <StatePanel v-if="loading || error" :loading="loading" :error="error" @retry="load" /><StatePanel
@@ -94,6 +111,7 @@ onMounted(load);
             {{ s.eventName }} · {{ s.name }}
           </option>
         </select>
+        <small>同一活动只能举报一次；已结束活动仅限本人有该活动订单且结束 7 天内。</small>
       </div>
       <div class="form-field">
         <label for="report-reason">举报原因</label

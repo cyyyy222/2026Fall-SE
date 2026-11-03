@@ -20,4 +20,44 @@ public record EventEntity(
     String settlementStatus,
     Long createdAtMs,
     Long updatedAtMs,
-    Long version) {}
+    Long version,
+    String proposedCategoryName) {
+  public EventEntity(
+      UUID id,
+      UUID organizerId,
+      String status,
+      String name,
+      UUID categoryId,
+      String categoryNameSnapshot,
+      String description,
+      UUID posterFileId,
+      Long submittedAtMs,
+      Long publishedAtMs,
+      Long terminatedAtMs,
+      String terminationReason,
+      String lastReviewReason,
+      String settlementStatus,
+      Long createdAtMs,
+      Long updatedAtMs,
+      Long version) {
+    this(
+        id,
+        organizerId,
+        status,
+        name,
+        categoryId,
+        categoryNameSnapshot,
+        description,
+        posterFileId,
+        submittedAtMs,
+        publishedAtMs,
+        terminatedAtMs,
+        terminationReason,
+        lastReviewReason,
+        settlementStatus,
+        createdAtMs,
+        updatedAtMs,
+        version,
+        null);
+  }
+}

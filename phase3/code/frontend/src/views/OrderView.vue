@@ -129,7 +129,7 @@ onMounted(load);
             ? '好事，值得耐心等待'
             : '订单详情'
       "
-      description="操作结果以当前订单状态为准，遇到网络异常请先查询。"
+      description="页面显示的是服务端最新订单状态；遇到网络异常时，请先刷新确认结果，再决定是否重试。"
       ><StatusBadge :status="order.status" /><button class="btn secondary small" @click="load">
         <AppIcon name="RefreshCw" :size="14" />刷新状态
       </button></PageHeading
@@ -143,7 +143,11 @@ onMounted(load);
     <div class="two-column">
       <section class="panel">
         <div class="panel-heading">
-          <h2>{{ order.event.eventName }}</h2>
+          <h2>
+            <RouterLink :to="`/events/${order.event.eventId}`">{{
+              order.event.eventName
+            }}</RouterLink>
+          </h2>
           <span class="tag">{{ order.event.categoryNameSnapshot }}</span>
         </div>
         <div class="payment-summary">
@@ -170,8 +174,8 @@ onMounted(load);
           ><div class="payment-method">
             <AppIcon name="Ticket" :size="25" />
             <div>
-              <strong>本地模拟支付</strong>
-              <p>仅用于课程原型，不涉及真实资金。</p>
+              <strong>模拟支付（课程演示）</strong>
+              <p>由你本人点击确认，不会扣真实款项。</p>
             </div>
             <AppIcon name="CheckCircle2" class="push-right" />
           </div>
@@ -190,7 +194,7 @@ onMounted(load);
             </button>
           </div>
           <p class="field-help" style="margin-top: 15px">
-            免费票同样需要确认支付。支付成功后生成唯一电子票，不重复扣占名额。
+            免费票同样需要确认支付。支付成功后生成 1 张电子票，名额只扣一次，不会重复占用。
           </p></template
         ><template v-else-if="order.status === 'WAITLISTED'"
           ><div class="order-state-head">
@@ -201,7 +205,7 @@ onMounted(load);
             </div>
           </div>
           <p class="content-prose">
-            候补暂不占位，也不会扣款。有名额时优先依序递补，并发送站内消息。递补成功后需先确认名额，再完成支付。
+            候补期间不占名额、不扣款。有人退票或名额增加时，系统按排队顺序通知你；收到通知后请先确认名额，再完成支付。确认和支付都必须在验票结束前完成，否则候补会失效。
           </p></template
         ><template v-else-if="order.status === 'OFFERED'"
           ><div class="order-state-head">
@@ -240,14 +244,14 @@ onMounted(load);
           ></template
         >
         <p v-if="task.error.value" class="error-inline" role="alert">
-          {{ task.error.value }}。若响应未知，请点击刷新状态确认结果；重试保持原操作编号。
+          {{ task.error.value }}。如果没看到明确结果，请先点击刷新状态确认，避免重复提交。
         </p>
         <div
           v-if="payments && (payments.paymentAttempts.length || payments.refundAttempts.length)"
           class="divider"
         />
         <div v-if="payments?.paymentAttempts.length">
-          <h3 style="font-size: 13px; margin-bottom: 14px">支付记录</h3>
+          <h3 style="font-size: 16px; margin-bottom: 14px">支付记录</h3>
           <div
             v-for="p in payments.paymentAttempts"
             :key="p.id"
@@ -259,7 +263,7 @@ onMounted(load);
           </div>
         </div>
         <div v-if="payments?.refundAttempts.length" style="margin-top: 22px">
-          <h3 style="font-size: 13px">退款记录</h3>
+          <h3 style="font-size: 16px">退款记录</h3>
           <div
             v-for="r in payments.refundAttempts"
             :key="r.id"
@@ -273,7 +277,7 @@ onMounted(load);
       </section>
       <aside>
         <section class="panel">
-          <h3 style="font-size: 15px; margin-bottom: 22px">订单信息</h3>
+          <h3 style="font-size: 17px; margin-bottom: 22px">订单信息</h3>
           <div class="info-list">
             <div class="info-row"><span>订单状态</span><StatusBadge :status="order.status" /></div>
             <div class="info-row">
@@ -311,7 +315,7 @@ onMounted(load);
         </section>
         <div class="alert info" style="margin-top: 20px">
           <AppIcon name="HelpCircle" :size="16" />
-          <p>网络异常不代表支付或退款失败。请先查当前订单，避免产生新的重复意图。</p>
+          <p>网络异常不代表支付或退款失败，操作可能已经完成。请先刷新订单状态，确认后再重试。</p>
         </div>
       </aside>
     </div></template
@@ -322,8 +326,8 @@ onMounted(load);
     ><p>
       {{
         confirm === 'refund'
-          ? '退款成功后电子票立即失效，名额释放。此操作不可恢复；0元票也会记录退款。'
-          : '取消后将释放已占名额或退出候补队列。重新报名需要再次满足当时的时间与资格条件。'
+          ? '退款成功后电子票立即失效，名额会释放给候补或其他人，且不能撤销；0 元票也会留下退款记录。'
+          : '取消后会释放名额或退出候补。重新报名时，需要重新满足当时的报名时间与资格条件。'
       }}
     </p>
     <form @submit.prevent="changeOrder">

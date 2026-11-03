@@ -275,6 +275,7 @@ public class EventUseCases {
         e.name(),
         e.categoryId(),
         e.categoryNameSnapshot(),
+        e.proposedCategoryName(),
         e.description(),
         e.posterFileId() == null ? null : "/api/management/events/" + e.id() + "/poster",
         views,
@@ -610,6 +611,8 @@ public class EventUseCases {
                                 trim(r.name()),
                                 "categoryId",
                                 r.categoryId(),
+                                "proposedCategoryName",
+                                trim(r.proposedCategoryName()),
                                 "description",
                                 trim(r.description()),
                                 "version",
@@ -668,13 +671,27 @@ public class EventUseCases {
                                         t.priceJiao(),
                                         t.saleStopped()))
                             .toList()))
-            .toList());
+            .toList(),
+        e.proposedCategoryName());
   }
 
   public void publicationRules(EventEntity e) {
+    publicationRules(e, false);
+  }
+
+  public void publicationRules(EventEntity e, boolean allowProposedCategory) {
     DomainRules.draft(draftOf(e), true, b.now());
-    var category = b.need(CategoryEntity.class, e.categoryId(), false);
-    require(category.enabled(), "STATE_CONFLICT", "类别已停用");
+    if (e.categoryId() == null) {
+      require(
+          allowProposedCategory
+              && e.proposedCategoryName() != null
+              && !trim(e.proposedCategoryName()).isEmpty(),
+          "STATE_CONFLICT",
+          "请选择类别或提出新的类别名称");
+    } else {
+      var category = b.need(CategoryEntity.class, e.categoryId(), false);
+      require(category.enabled(), "STATE_CONFLICT", "类别已停用");
+    }
     var owner = b.need(UserEntity.class, e.organizerId(), true);
     require(owner.enabled() && owner.deletedAtMs() == null, "ACCOUNT_UNAVAILABLE", "组织者不可用");
     require(!b.restricted(owner.phoneIdentityId(), "PUBLISH"), "PUBLISH_RESTRICTED", "组织者处于发布限制期");
@@ -717,7 +734,7 @@ public class EventUseCases {
                         e.status().equals(submit ? "DRAFT" : "PENDING_REVIEW"),
                         "STATE_CONFLICT",
                         "活动状态不允许此操作");
-                    if (submit) publicationRules(e);
+                    if (submit) publicationRules(e, true);
                     b.db()
                         .save(
                             copy(
@@ -728,7 +745,9 @@ public class EventUseCases {
                                 submit ? b.now() : null,
                                 "categoryNameSnapshot",
                                 submit
-                                    ? b.need(CategoryEntity.class, e.categoryId(), false).name()
+                                    ? (e.categoryId() == null
+                                        ? trim(e.proposedCategoryName())
+                                        : b.need(CategoryEntity.class, e.categoryId(), false).name())
                                     : e.categoryNameSnapshot(),
                                 "updatedAtMs",
                                 b.now(),
@@ -975,6 +994,44 @@ public class EventUseCases {
                         reasonCode = null;
                     if (reason == null) {
                       try {
+                        if (e.categoryId() == null) {
+                          String proposed = trim(e.proposedCategoryName());
+                          if (proposed != null && !proposed.isEmpty()) {
+                            var existing =
+                                b.db()
+                                    .one(
+                                        CategoryEntity.class,
+                                        eq("nameNormalized", normalize(proposed)),
+                                        false)
+                                    .orElse(null);
+                            UUID categoryId;
+                            if (existing == null) {
+                              categoryId = id();
+                              b.db()
+                                  .insert(
+                                      new CategoryEntity(
+                                          categoryId,
+                                          proposed,
+                                          normalize(proposed),
+                                          true,
+                                          0L,
+                                          b.now(),
+                                          b.now()));
+                            } else {
+                              require(existing.enabled(), "STATE_CONFLICT", "类别已停用");
+                              categoryId = existing.id();
+                            }
+                            b.db()
+                                .save(
+                                    copy(
+                                        e,
+                                        "categoryId",
+                                        categoryId,
+                                        "categoryNameSnapshot",
+                                        proposed));
+                            e = b.need(EventEntity.class, eventId, true);
+                          }
+                        }
                         publicationRules(e);
                         for (var s : b.sessions(eventId))
                           require(

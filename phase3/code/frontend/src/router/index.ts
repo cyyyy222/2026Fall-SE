@@ -56,6 +56,11 @@ export const router = createRouter({
       meta: { title: '我的电子票', roles: ['PARTICIPANT'] },
     },
     {
+      path: '/appeals',
+      component: () => import('../views/AppealsView.vue'),
+      meta: { title: '我的申诉', roles: ['PARTICIPANT'] },
+    },
+    {
       path: '/reports/:action?',
       component: () => import('../views/ReportsView.vue'),
       meta: { title: '活动举报', roles: ['PARTICIPANT'] },
@@ -109,6 +114,11 @@ export const router = createRouter({
       path: '/admin/events/:eventId',
       component: () => import('../views/ManageEventView.vue'),
       meta: { title: '活动审核详情', roles: ['ADMIN'] },
+    },
+    {
+      path: '/admin/appeals',
+      component: () => import('../views/AppealsAdminView.vue'),
+      meta: { title: '处罚申诉', roles: ['ADMIN'] },
     },
     {
       path: '/admin/:section',

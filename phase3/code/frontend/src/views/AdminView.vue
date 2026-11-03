@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { get, patch, post, query, request } from '../api/client';
 import type { CampusEvent, Page, Role } from '../types';
@@ -52,6 +52,8 @@ const credentials = ref<{
   role: string;
   assignment: string;
 } | null>(null);
+const credentialMode = ref<'created' | 'reset'>('created');
+const loginUrl = `${location.origin}/#/login`;
 const config: Record<string, { title: string; description: string; icon: string; path: string }> = {
   reviews: {
     title: '活动审核',
@@ -85,19 +87,19 @@ const config: Record<string, { title: string; description: string; icon: string;
   },
   investigations: {
     title: '核查记录',
-    description: '同活动同一事实仅记一次违规；已终态活动不回改状态。',
+    description: '同一活动的同一事实只记录一次违规；已经结束的活动不会再改动状态。',
     icon: 'ShieldCheck',
     path: '/admin/investigations',
   },
   restrictions: {
     title: '报名与发布限制',
-    description: '限制新业务，不影响合法既有订单履约。按手机号身份关联事实。',
+    description: '限制新的报名或发布，但不影响已经成立的订单；按手机号对应的身份记录。',
     icon: 'LockKeyhole',
     path: '/admin/restriction-candidates',
   },
   payments: {
     title: '支付记录与退款排障',
-    description: '查看模拟交易记录；仅按合法失败依据重试退款，不提供代支付。',
+    description: '查看模拟支付记录；只有确实失败且原因合法的退款才能重试，平台不代替用户支付。',
     icon: 'Ticket',
     path: '/admin/payments',
   },
@@ -109,7 +111,7 @@ const config: Record<string, { title: string; description: string; icon: string;
   },
   jobs: {
     title: '后台处理进度',
-    description: '终止立即生效，逐项处理可恢复。超期仍继续，并记录未达标。',
+    description: '终止会立即生效，逐项处理且可以恢复；超过目标时间仍会继续，并记录为超时。',
     icon: 'RefreshCw',
     path: '/admin/jobs',
   },
@@ -185,14 +187,20 @@ const selectableSessions = computed(() =>
     (s) =>
       configurableEvents.value.some((e) => e.id === s.eventId) &&
       Date.parse(s.endsAt) > Date.now() &&
-      (modal.value === 'binding'
-        ? s.eventId === selected.value?.eventId
-        : s.eventId === form.eventId),
+      (modal.value === 'binding' || s.eventId === form.eventId),
   ),
 );
 const eventName = (eventId: unknown) =>
   eventOptions.value.find((e) => e.id === eventId)?.name || String(eventId || '—');
 const titleOf = (row: Row) => (s(row, 'name') === '—' ? '未命名草稿' : s(row, 'name'));
+const objectTypeNames: Record<string, string> = {
+  ORDER: '订单',
+  PAYMENT: '支付',
+  REFUND: '退款',
+  TICKET: '电子票',
+  CHECKIN: '签到',
+};
+const objectTypeName = (value: string) => objectTypeNames[value] || value;
 const badge = (row: Row) => (s(row, 'status') === '—' ? s(row, 'result') : s(row, 'status'));
 const endpoint = computed(() =>
   section.value === 'payments' && tab.value === 'refunds'
@@ -241,16 +249,29 @@ function open(kind: string, row?: Row) {
     form.initialPassword = '';
   }
   if (['accountReset', 'reset', 'recovery'].includes(kind)) form.initialPassword = '';
+  if (kind === 'accountReset') generatePassword();
   if (kind === 'recovery') form.decision = 'VERIFIED';
 }
-function showCredentials(username: string, role: string) {
+function showCredentials(username: string, role: string, mode: 'created' | 'reset' = 'created') {
   const session = allSessions.value.find((s) => s.id === form.sessionId);
+  credentialMode.value = mode;
   credentials.value = {
     username,
     role,
     password: form.initialPassword,
     assignment: session ? `${session.eventName} · ${session.name}` : '',
   };
+}
+function generatePassword() {
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const all = letters + digits;
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  let value = letters[bytes[0]! % letters.length] + digits[bytes[1]! % digits.length];
+  for (let index = 2; index < bytes.length; index += 1) {
+    value += all[bytes[index]! % all.length];
+  }
+  form.initialPassword = value;
 }
 async function copyCredentials() {
   if (!credentials.value) return;
@@ -265,8 +286,14 @@ async function copyCredentials() {
   }
 }
 async function submit() {
+  const credentialAction = ['account', 'accountReset'].includes(modal.value);
   await task.run(async () => {
     if (modal.value === 'account') {
+      const username = form.username.trim();
+      if (!username) throw new Error('请填写用户名');
+      if (rows.value.some((row) => s(row, 'username').toLowerCase() === username.toLowerCase()))
+        throw new Error('这个用户名已被当前列表中的账号使用，请换一个用户名');
+      form.username = username;
       await post('/admin/accounts', {
         username: form.username,
         initialPassword: form.initialPassword,
@@ -280,12 +307,13 @@ async function submit() {
         expectedVersion: n(selected.value!, 'version'),
         assignedSessionId: form.sessionId,
       });
-    else if (modal.value === 'accountReset')
+    else if (modal.value === 'accountReset') {
       await post(`/admin/accounts/${id(selected.value!)}/password-reset`, {
         initialPassword: form.initialPassword,
         reason: form.reason,
       });
-    else if (modal.value === 'deleteAccount')
+      showCredentials(s(selected.value!, 'username'), s(selected.value!, 'role'), 'reset');
+    } else if (modal.value === 'deleteAccount')
       await request(
         'DELETE',
         `/admin/accounts/${id(selected.value!)}?expectedVersion=${n(selected.value!, 'version')}`,
@@ -338,7 +366,13 @@ async function submit() {
       });
     modal.value = '';
     await load();
-    app.toast('操作已完成');
+    if (credentialAction) {
+      await nextTick();
+      document
+        .querySelector('.credential-receipt')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    app.toast(credentialAction ? '操作已完成，请复制并交接新凭据' : '操作已完成');
   });
 }
 async function toggle(row: Row) {
@@ -412,26 +446,37 @@ onMounted(load);
   <section
     v-if="section === 'accounts' && credentials"
     class="panel credential-receipt"
-    aria-label="新账号凭据"
+    :aria-label="credentialMode === 'reset' ? '新临时密码' : '新账号凭据'"
   >
-    <h3>账号已创建，请完成凭据交接</h3>
-    <p>
+    <h3>
+      {{ credentialMode === 'reset' ? '密码已重置，请重新交接' : '账号已创建，请完成凭据交接' }}
+    </h3>
+    <p v-if="credentialMode === 'reset'">
+      新的临时密码只显示这一次。请通过可信渠道交给本人；对方用它登录后必须先修改密码，之前的密码和已登录会话都已失效。
+    </p>
+    <p v-else>
       {{
         credentials.role === 'CHECKER'
-          ? '请把以下检票凭据交给对应活动组织者，由组织者安排工作人员。组织者需退出自己的账号，再用检票账号登录。'
-          : '请把凭据交给新管理员，新管理员首次登录必须修改密码。'
+          ? '请把以下检票凭据交给对应活动组织者，由组织者安排工作人员。组织者需要先退出自己的账号，再用检票账号登录。'
+          : '请把凭据交给新管理员，新管理员首次登录时必须修改密码。'
       }}
     </p>
     <p v-if="credentials.assignment">授权活动与场次：{{ credentials.assignment }}</p>
+    <p class="field-help credential-login-url">登录地址：{{ loginUrl }}</p>
     <div class="credential-values">
       <span
         >账号 <strong>{{ credentials.username }}</strong></span
       ><span
-        >初始密码 <strong>{{ credentials.password }}</strong></span
+        >{{ credentialMode === 'reset' ? '临时密码' : '初始密码' }}
+        <strong>{{ credentials.password }}</strong></span
       >
     </div>
     <p class="field-help">
-      只在本次创建后展示初始密码，关闭或离开页面后不再显示。系统不保存可回查的明文密码，不自动向任何人发送凭据；遗失后由管理员重置。
+      {{
+        credentialMode === 'reset'
+          ? '新密码只在本次重置后显示一次，关闭或离开页面后不再显示。请现在复制并交给本人；遗失后需要再次重置。'
+          : '初始密码只在本次创建后显示一次，关闭或离开页面后不再显示。系统不会保存可查看的明文密码，也不会自动发送；遗失后请在账号列表中重置。'
+      }}
     </p>
     <div class="button-row">
       <button class="btn secondary small" @click="copyCredentials">复制交接信息</button
@@ -443,10 +488,10 @@ onMounted(load);
     <p>
       {{
         accountRole === 'CHECKER'
-          ? '每场至少一名检票员，也可以配置多名；一个检票账号当前只绑定一场，不需要手机号。账号共用会互相挤下线，请为每名同时值守的工作人员创建独立账号。'
+          ? '每场至少一名检票员，也可以配置多名；一个检票账号当前只绑定一场，不需要手机号。多人共用一个账号会互相挤下线，请为每位同时值守的工作人员分别创建账号。初始密码只能查看一次，遗失后请点「重置密码」生成新密码。'
           : accountRole === 'ADMIN'
             ? '首个管理员由系统初始化，已有管理员仍可创建其他管理员。管理员不绑定手机号或检票场次。'
-            : '这里仅列出当前类型账号。参与者与组织者分别注册和登录，同一个手机号可以拥有这两种身份；账号角色不切换。'
+            : '这里只列出当前类型的账号。参与者与组织者分别注册和登录，同一个手机号可以拥有这两种身份；账号角色不能切换。'
       }}
     </p>
   </div>
@@ -454,7 +499,7 @@ onMounted(load);
     <AppIcon name="HelpCircle" />
     <p>
       信息来源：登录页 → 忘记密码 → 填写用户名和登记手机号 →
-      提交申请。工作人员通过当面核对或已有联系渠道确认本人身份，在本页记录核验依据，再设置临时密码并自行告知本人。系统不会自动核实陈述。普通用户优先通过手机号验证码重置密码；人工审核通过后可在本页直接换绑并重置，通知只模拟输出在后端LOCAL_RECOVERY_SMS日志，不真正发送短信。
+      提交申请。工作人员会当面核对，或通过已有联系渠道确认本人身份，在本页记录核验依据，再设置临时密码并告知本人；系统不会自动核实陈述。普通用户优先用手机号验证码重置密码。本地演示不会真的发送短信，通知会记录在后端日志中。
     </p>
   </div>
   <div v-if="section === 'audit'" class="alert info" style="margin-bottom: 22px">
@@ -485,7 +530,7 @@ onMounted(load);
     </div>
     <div class="stat-card soft">
       <div class="stat-label">发布检查<AppIcon name="ShieldCheck" :size="16" /></div>
-      <div style="font-size: 14px; margin: 17px 0 8px; color: #768467">
+      <div style="font-size: 15px; margin: 17px 0 8px; color: #5f6a5c">
         先配置每场检票账号，再进行审核
       </div>
       <div class="stat-foot">复核类别、时间、排期、限制与每日额度</div>
@@ -494,19 +539,20 @@ onMounted(load);
   <div v-if="section === 'restrictions'" class="stat-grid">
     <div class="stat-card soft" style="grid-column: span 2">
       <div class="stat-label">参与者新报名限制</div>
-      <h3 style="font-family: var(--serif); margin: 14px 0 8px">3次缺席 / 5次主动成功退款</h3>
-      <p class="field-help">连续30天事实，经管理员核实后限制15天。</p>
+      <h3 style="font-family: var(--serif); margin: 14px 0 8px">3 次缺席 / 5 次主动成功退款</h3>
+      <p class="field-help">统计最近连续 30 天内的事实，管理员核实后限制 15 天。</p>
     </div>
     <div class="stat-card" style="grid-column: span 2">
       <div class="stat-label">组织者新发布限制</div>
-      <h3 style="font-family: var(--serif); margin: 14px 0 8px">3次合格违规事实</h3>
-      <p class="field-help">自动限制15天，已有活动不会自动取消。</p>
+      <h3 style="font-family: var(--serif); margin: 14px 0 8px">3 次合格违规事实</h3>
+      <p class="field-help">自动限制 15 天，已经发布的活动不会因此取消。</p>
     </div>
   </div>
   <div v-if="section === 'jobs'" class="alert info" style="margin-bottom: 23px">
     <AppIcon name="Clock3" />
     <p>
-      这里查看系统自动工作的进度，例如取消超时未支付订单、递补候补、处理活动退款和结算。进度保存在数据库，应用重启后可继续，不需要管理员逐单执行。超时释放、递补、自然结算目标1分钟；取消/下架结算目标5分钟，尚未完成故障恢复性能验收。
+      这里显示系统自动处理的进度，例如取消超时未支付的订单、递补候补、处理退款和结算。进度保存在数据库中，应用重启后会继续，不需要逐单操作。多数任务目标在
+      1 分钟内完成，活动取消或下架后的结算约需 5 分钟。
     </p>
   </div>
   <section class="panel">
@@ -548,7 +594,7 @@ onMounted(load);
                 ? '按完整对象编号查询日志'
                 : section === 'accounts'
                   ? '按当前类型的用户名搜索'
-                  : '在当前页搜索名称、状态或编号'
+                  : '搜索名称、状态或编号'
           "
           aria-label="筛选管理记录"
         />
@@ -580,10 +626,10 @@ onMounted(load);
       "
       :description="
         section === 'jobs'
-          ? '取消或下架活动后，会在这里查看本地演示的结算结果。'
+          ? '取消或下架活动后，结算进度会显示在这里。'
           : section === 'restrictions'
-            ? '当前演示夹具未构造达到处罚阈值的事实，不显示虚构候选或处罚成功。'
-            : '新的业务记录将在操作后显示。'
+            ? '当前没有达到限制条件的账号，系统不会展示虚构的候选记录。'
+            : '新的业务记录会在操作后显示。'
       "
       :icon="current.icon"
     />
@@ -655,18 +701,34 @@ onMounted(load);
                 v-if="['ADMIN', 'CHECKER'].includes(s(row, 'role')) && !row.deletedAt"
                 class="action-group"
               >
-                <button class="text-link" :disabled="task.busy.value" @click="toggle(row)">
+                <button
+                  v-if="row.role !== 'CHECKER' || !!row.assignedSessionId"
+                  class="text-link"
+                  :disabled="task.busy.value"
+                  @click="toggle(row)"
+                >
                   {{ row.enabled ? '停用' : '启用' }}</button
                 ><button
-                  v-if="row.role === 'CHECKER'"
+                  v-if="row.role === 'CHECKER' && row.enabled && row.assignedSessionId"
                   class="text-link"
                   @click="open('binding', row)"
                 >
                   改绑</button
-                ><button class="text-link" @click="open('accountReset', row)">重置密码</button
-                ><button class="text-link" @click="open('deleteAccount', row)">删除</button>
+                ><button
+                  v-if="row.role !== 'CHECKER' || !!row.assignedSessionId"
+                  class="text-link"
+                  @click="open('accountReset', row)"
+                >
+                  重置密码</button
+                ><button class="text-link" @click="open('deleteAccount', row)">删除</button
+                ><span
+                  v-if="row.role === 'CHECKER' && !row.assignedSessionId"
+                  class="muted"
+                  style="font-size: 12.5px"
+                  >已失效，需新建账号</span
+                >
               </div>
-              <span v-else class="muted" style="font-size: 10px">{{
+              <span v-else class="muted" style="font-size: 12.5px">{{
                 row.deletedAt ? '历史账号只读' : '自行注册；密码问题通过账号找回申请处理'
               }}</span>
             </td>
@@ -819,7 +881,9 @@ onMounted(load);
         <tbody>
           <tr v-for="row in visible" :key="id(row)">
             <td>{{ dateTime(s(row, 'createdAt')) }}</td>
-            <td>{{ s(row, 'actorRole') }}</td>
+            <td>
+              {{ roleNames[s(row, 'actorRole') as keyof typeof roleNames] || s(row, 'actorRole') }}
+            </td>
             <td>{{ s(row, 'action') }}</td>
             <td>
               <button
@@ -829,7 +893,7 @@ onMounted(load);
                   form.objectType = s(row, 'objectType') === 'TICKET' ? 'TICKET' : 'ORDER';
                 "
               >
-                {{ s(row, 'objectType') }} · {{ s(row, 'objectId').slice(0, 8) }}…
+                {{ objectTypeName(s(row, 'objectType')) }} · {{ s(row, 'objectId').slice(0, 8) }}…
               </button>
             </td>
             <td><StatusBadge :status="s(row, 'result')" /></td>
@@ -882,9 +946,9 @@ onMounted(load);
           <tr>
             <th>手机号身份</th>
             <th>限制类型</th>
-            <th>正常缺席</th>
-            <th>主动退款</th>
-            <th>违规</th>
+            <th>缺席次数</th>
+            <th>主动退款次数</th>
+            <th>违规次数</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -924,7 +988,7 @@ onMounted(load);
               {{ s(row, 'phone')
               }}<small class="secondary-text">当前：{{ s(row, 'currentPhone') }}</small>
             </td>
-            <td>{{ s(row, 'status') }}</td>
+            <td>{{ label(s(row, 'status')) }}</td>
             <td>{{ dateTime(s(row, 'createdAt')) }}</td>
             <td>
               <button class="text-link" @click="open('recoveryDetails', row)">查看申诉资料</button
@@ -977,12 +1041,22 @@ onMounted(load);
   <section v-if="section === 'audit'" class="panel">
     <div class="panel-heading">
       <h2>单条对象审计</h2>
-      <span class="tag">不能重建过期名单或汇总</span>
+      <span class="tag">只用于查看历史操作，不重建过期名单或统计</span>
     </div>
     <form class="toolbar" @submit.prevent="auditObject">
       <select v-model="form.objectType" aria-label="审计对象类型">
-        <option v-for="t in ['ORDER', 'PAYMENT', 'REFUND', 'TICKET', 'CHECKIN']" :key="t">
-          {{ t }}
+        <option
+          v-for="t in [
+            ['ORDER', '订单'],
+            ['PAYMENT', '支付'],
+            ['REFUND', '退款'],
+            ['TICKET', '电子票'],
+            ['CHECKIN', '签到'],
+          ]"
+          :key="t[0]"
+          :value="t[0]"
+        >
+          {{ t[1] }}
         </option></select
       ><input
         v-model="form.objectId"
@@ -996,14 +1070,15 @@ onMounted(load);
   <div v-if="section === 'restrictions'" class="alert info" style="margin-top: 23px">
     <AppIcon name="ShieldCheck" />
     <p>
-      0元主动退款同样计次；平台退款、候补放弃、未支付取消不计。旧依据不能重复处罚，当前演示不伪造达到阈值的名单。
+      自己主动申请退款（包括 0
+      元票）也会计入次数；活动方退款、放弃候补、未支付取消不计入。同一事实不能重复处罚。
     </p>
   </div>
   <AppModal
     :open="modal !== ''"
     :title="
       modal === 'account'
-        ? '创建特权账号'
+        ? '创建管理员 / 检票账号'
         : modal === 'category'
           ? selected
             ? '修改类别名称'
@@ -1017,9 +1092,9 @@ onMounted(load);
                 : modal === 'binding'
                   ? '改绑检票场次'
                   : modal === 'accountReset'
-                    ? '重置特权账号密码'
+                    ? '重置管理员 / 检票账号密码'
                     : modal === 'deleteAccount'
-                      ? '逻辑删除特权账号'
+                      ? '删除账号（保留历史记录）'
                       : modal === 'restriction'
                         ? '核实报名限制依据'
                         : modal === 'refundRetry'
@@ -1041,11 +1116,26 @@ onMounted(load);
         </div>
         <div class="form-field">
           <label for="new-account-name">用户名</label
-          ><input id="new-account-name" v-model="form.username" required />
+          ><input id="new-account-name" v-model="form.username" required maxlength="60" /><small
+            >用户名不能与其他账号重复，不区分大小写和首尾空格。</small
+          >
         </div>
         <div class="form-field">
-          <label for="new-account-password">初始密码</label
-          ><input id="new-account-password" v-model="form.initialPassword" required minlength="8" />
+          <div class="field-label-row">
+            <label for="new-account-password">初始密码</label
+            ><button type="button" class="text-link" @click="generatePassword">生成随机密码</button>
+          </div>
+          <input
+            id="new-account-password"
+            v-model="form.initialPassword"
+            required
+            minlength="8"
+            maxlength="72"
+            pattern="(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{8,72}"
+            autocomplete="new-password"
+            placeholder="8～72位字母和数字组合"
+          />
+          <small>保存后会显示一次，请当时复制并交接；之后无法回查，只能重置。</small>
         </div>
         <div v-if="form.role === 'CHECKER'" class="form-field">
           <label for="new-account-event">分配活动</label
@@ -1089,12 +1179,14 @@ onMounted(load);
           <label for="conclusion">人工核查结论</label
           ><select id="conclusion" v-model="form.conclusion">
             <option value="UNSUBSTANTIATED">不属实，不处罚</option>
-            <option value="SUBSTANTIATED">属实，记录违规并依法下架</option>
+            <option value="SUBSTANTIATED">属实，记录违规并下架活动</option>
           </select>
         </div>
         <div class="form-field">
-          <label for="fact-key">同一事实标识</label
-          ><input id="fact-key" v-model="form.factKey" required maxlength="120" />
+          <label for="fact-key">同一事实编号</label
+          ><input id="fact-key" v-model="form.factKey" required maxlength="120" /><small
+            >用来避免同一件事被重复处罚，一般保持默认即可。</small
+          >
         </div>
         <div class="form-field">
           <label for="investigation-reason">处理理由</label
@@ -1143,13 +1235,13 @@ onMounted(load);
             pattern="(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{8,72}"
             autocomplete="new-password"
           /><small
-            >通过后换绑申请人已验证的当前手机号，再模拟短信下发账号和临时密码。日志标记LOCAL_RECOVERY_SMS。</small
+            >通过后会换绑申请人验证过的当前手机号，并生成临时密码；本地演示不会发短信，通知会记录在后端日志中。</small
           >
         </div>
       </template>
       <template v-if="modal === 'reset'">
         <p class="field-help">
-          仅使用这条已审核通过的申请；换绑其已验证的当前手机号、重置密码并模拟短信通知，不凭手机号直接改密。
+          仅使用这条已审核通过的申请；换绑其已验证的当前手机号、重置密码并记录模拟通知，不凭手机号直接改密。
         </p>
         <div class="form-field">
           <label for="reset-password">临时密码</label
@@ -1170,25 +1262,38 @@ onMounted(load);
           </select>
         </div>
         <p class="field-help">
-          仅同活动未结束场次，不能移走原场最后一个可用检票员；历史签到归属不改变。
+          可以选择其他活动的场次，但必须是待审核或已发布、且尚未结束的场次。改绑后原场次授权立即失效，该账号需要重新登录。如果原场次只有这一个检票账号，请先为原场添加替代账号，否则不能移走；历史签到归属不变。
         </p></template
       ><template v-if="['accountReset', 'refundRetry', 'restriction'].includes(modal)"
         ><div v-if="modal === 'accountReset'" class="form-field">
-          <label for="privileged-reset">新的临时密码</label
-          ><input id="privileged-reset" v-model="form.initialPassword" required minlength="8" />
+          <div class="field-label-row">
+            <label for="privileged-reset">新的临时密码</label
+            ><button type="button" class="text-link" @click="generatePassword">生成随机密码</button>
+          </div>
+          <input
+            id="privileged-reset"
+            v-model="form.initialPassword"
+            required
+            minlength="8"
+            maxlength="72"
+            pattern="(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{8,72}"
+            autocomplete="new-password"
+            placeholder="8～72位字母和数字组合"
+          />
+          <small>无法查看原密码。重置后会显示一次新密码，旧密码和旧会话立即失效。</small>
         </div>
         <div class="form-field">
           <label for="basis-reason">核实依据与操作理由</label
           ><textarea id="basis-reason" v-model="form.reason" required maxlength="200" />
         </div>
         <p class="field-help">
-          提交时重新核验原依据、当前状态与权限；不能通过此入口扩大原授权范围。
+          提交时会重新检查原依据、当前状态和权限；不能通过这个入口扩大原有的授权范围。
         </p></template
       >
       <div v-if="modal === 'deleteAccount'" class="alert warning">
         <AppIcon name="CircleAlert" />
         <p>
-          账号凭据和旧会话立即失效，保留历史签到与审计关联；不能删除最后一个可用管理员或移走最后一个可用检票员。
+          账号凭据和旧会话立即失效，历史签到与审计记录继续保留；不能删除最后一个可用管理员，也不能移走最后一个可用检票员。
         </p>
       </div>
       <p v-if="task.error.value" class="error-inline" role="alert">{{ task.error.value }}</p>

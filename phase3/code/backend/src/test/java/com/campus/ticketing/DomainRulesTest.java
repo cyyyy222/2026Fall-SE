@@ -16,8 +16,13 @@ class DomainRulesTest {
     assertThat(DomainRules.overlaps(10, 21, 20, 30)).isTrue();
     assertThat(DomainRules.payDeadline(1000, 2000)).isEqualTo(2000);
     assertThat(DomainRules.promotionDeadline(1000, 2000)).isEqualTo(2000);
-    assertThat(DomainRules.checkinWindow(700, 1000, 2000)).isTrue();
-    assertThat(DomainRules.checkinWindow(2000, 1000, 2000)).isFalse();
+    long start = 10 * 3_600_000L;
+    long end = 12 * 3_600_000L;
+    assertThat(DomainRules.checkinOpen(start)).isEqualTo(start - 2 * 3_600_000L);
+    assertThat(DomainRules.checkinClose(start, end)).isEqualTo(start + 3_600_000L);
+    assertThat(DomainRules.checkinWindow(start - 2 * 3_600_000L, start, end)).isTrue();
+    assertThat(DomainRules.checkinWindow(start - 2 * 3_600_000L - 1, start, end)).isFalse();
+    assertThat(DomainRules.checkinWindow(start + 3_600_000L, start, end)).isFalse();
   }
 
   @Test

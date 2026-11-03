@@ -14,7 +14,8 @@ import java.lang.annotation.*;
 public @interface BeijingTime {
   int granularity() default 0;
 
-  String message() default "时间须为+08:00且满足整小时或分钟粒度";
+  String message() default
+      "时间格式不正确：请使用带时区的 ISO 时间（例如 2026-11-05T19:30:00+08:00），秒和毫秒必须为 0";
 
   Class<?>[] groups() default {};
 

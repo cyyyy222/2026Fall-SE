@@ -15,6 +15,8 @@ public interface MessageService {
 
   UseCaseResult<Views.MessageView> messageDetail(RequestContext context, UUID messageId);
 
+  UseCaseResult<Views.UnreadCount> unreadCount(RequestContext context);
+
   UseCaseResult<Mutation<Views.MessageView>> markRead(
       RequestContext context, UUID messageId, Requests.Empty request);
 }

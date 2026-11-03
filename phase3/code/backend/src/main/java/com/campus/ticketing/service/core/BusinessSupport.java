@@ -214,7 +214,8 @@ public class BusinessSupport {
                         in("phoneIdentityId", governancePhoneIds(identityId, kind)),
                         eq("kind", kind),
                         le("startsAtMs", now()),
-                        gt("endsAtMs", now())))
+                        gt("endsAtMs", now()),
+                        nil("revokedAtMs")))
             > 0;
   }
 

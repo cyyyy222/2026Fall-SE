@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAppStore } from './stores/app';
 import { isMock } from './api/client';
@@ -10,6 +10,18 @@ const route = useRoute();
 const router = useRouter();
 const menuOpen = ref(false);
 const workspace = computed(() => /^\/(organizer|admin|checker)(\/|$)/.test(route.path));
+let unreadTimer: ReturnType<typeof setInterval> | undefined;
+onMounted(() => {
+  void app.refreshUnreadMessages();
+  unreadTimer = setInterval(() => void app.refreshUnreadMessages(), 60_000);
+});
+onUnmounted(() => {
+  if (unreadTimer) clearInterval(unreadTimer);
+});
+watch(
+  () => [route.fullPath, app.user?.id],
+  () => void app.refreshUnreadMessages(),
+);
 const menus = computed(() =>
   app.user?.role === 'ORGANIZER'
     ? [
@@ -33,6 +45,7 @@ const menus = computed(() =>
           ['/admin/accounts', 'UsersRound', '账号分类管理'],
           ['/admin/categories', 'List', '活动类别'],
           ['/admin/reports', 'ShieldCheck', '举报与核查'],
+          ['/admin/appeals', 'HelpCircle', '处罚申诉'],
           ['/admin/restrictions', 'LockKeyhole', '报名与发布限制'],
           ['/admin/payments', 'Ticket', '支付与退款'],
           ['/admin/audit', 'FileText', '操作记录'],
@@ -85,6 +98,12 @@ async function logout() {
           :class="{ active: route.path.startsWith('/reports') }"
           >我的举报</RouterLink
         >
+        <RouterLink
+          v-if="app.user?.role === 'PARTICIPANT'"
+          to="/appeals"
+          :class="{ active: route.path.startsWith('/appeals') }"
+          >我的申诉</RouterLink
+        >
       </nav>
       <div v-else-if="workspace" class="workspace-label">
         <span class="small-dot" />{{ app.user ? roleNames[app.user.role] : '' }}工作空间
@@ -96,7 +115,9 @@ async function logout() {
         >
         <template v-if="app.user"
           ><RouterLink to="/messages" class="icon-btn notification-link" aria-label="站内消息"
-            ><AppIcon name="Bell" :size="20" /><span class="notification-dot"
+            ><AppIcon name="Bell" :size="20" /><span
+              v-if="app.unreadMessages > 0"
+              class="notification-dot"
           /></RouterLink>
           <div class="account-menu">
             <button class="avatar-button" @click="menuOpen = !menuOpen" :aria-expanded="menuOpen">

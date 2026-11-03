@@ -64,6 +64,7 @@ export interface CampusEvent {
   name: string;
   categoryId: string;
   categoryNameSnapshot: string;
+  proposedCategoryName?: string | null;
   description: string;
   posterUrl: string | null;
   sessions: Session[];
@@ -280,4 +281,27 @@ export interface AuditLog {
   failureReason: string | null;
   createdAt: string;
   traceId: string;
+}
+
+export interface Restriction {
+  id: string;
+  kind: string;
+  startsAt: string;
+  endsAt: string;
+  reason: string;
+  source: string | null;
+  active: boolean;
+}
+export interface RestrictionAppeal {
+  id: string;
+  restrictionId: string;
+  userId: string;
+  username: string;
+  reason: string;
+  evidenceText: string | null;
+  status: string;
+  createdAt: string;
+  reviewedAt: string | null;
+  decisionNote: string | null;
+  restriction: Restriction;
 }

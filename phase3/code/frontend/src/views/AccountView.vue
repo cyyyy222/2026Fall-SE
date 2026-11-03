@@ -116,7 +116,9 @@ onMounted(loadClosure);
         </div>
       </div>
       <div class="divider" />
-      <p class="field-help">账号角色固定；普通用户可在右侧本人资料中换绑登录手机号。</p>
+      <p class="field-help">
+        账号角色创建后固定，不能切换；参与者和组织者可以在本人资料中换绑登录手机号。
+      </p>
     </aside>
     <div>
       <section v-if="normal && !forced" class="panel account-section">
@@ -188,7 +190,8 @@ onMounted(loadClosure);
             </div>
           </div>
           <p class="field-help">
-            修改后所有旧会话失效，需要重新登录。密码仅含ASCII字母和数字，且两类均有。
+            修改后所有已登录设备会退出，需要用新密码重新登录。密码只能使用英文字母和数字，两者都要有，长度
+            8–72 位。
           </p>
           <p v-if="task.error.value" class="error-inline">{{ task.error.value }}</p>
           <button class="btn primary small" :disabled="task.busy.value" style="margin-top: 18px">
@@ -201,11 +204,12 @@ onMounted(loadClosure);
           <h2><span class="section-index">03</span>账号注销</h2>
         </div>
         <p class="field-help">
-          注销不可恢复，历史业务与审计关联继续保留。有有效候补、占位、票、待处理退款或未结束活动时不能注销。
+          注销后不能恢复，历史订单、票据和操作记录仍会按规则保留。只要还有进行中的订单、候补、电子票、待处理退款，或你还有未结束的活动，就不能注销。
         </p>
         <ul
           v-if="closure?.blockers.length"
-          style="font-size: 11px; color: #a08770; padding-left: 18px; margin-top: 15px"
+          class="closure-blockers"
+          style="padding-left: 18px; margin-top: 15px"
         >
           <li v-for="b in closure.blockers" :key="b.message">{{ b.message }}</li>
         </ul>
@@ -262,7 +266,9 @@ onMounted(loadClosure);
   <AppModal :open="phoneModal" title="换绑手机号" @close="phoneModal = false">
     <form @submit.prevent="changePhone">
       <p class="field-help">
-        当前绑定：{{ app.user?.maskedPhone }}。只验证新手机号，不需要原手机号验证码。
+        当前绑定：{{
+          app.user?.maskedPhone
+        }}。换绑只需要验证新手机号，不需要原手机号验证码；换绑后请用新手机号重新登录。
       </p>
       <div class="form-field">
         <label for="new-bound-phone">新手机号</label

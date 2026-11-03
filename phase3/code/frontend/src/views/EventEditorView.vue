@@ -10,7 +10,6 @@ import PageHeading from '../components/PageHeading.vue';
 import StatePanel from '../components/StatePanel.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import AppIcon from '../components/AppIcon.vue';
-import AppModal from '../components/AppModal.vue';
 const route = useRoute();
 const router = useRouter();
 const task = useTask();
@@ -21,8 +20,10 @@ const loading = ref(true);
 const error = ref('');
 const poster = ref('');
 const posterFile = ref<File>();
-const rounding = ref<{ session: Session; field: 'startsAt' | 'endsAt'; value: string }>();
-const count = computed(() => event.value?.description.length || 0);
+const proposedCategory = ref('');
+const beijingIso = (value: Date) =>
+  `${new Date(value.getTime() + 8 * 3600000).toISOString().slice(0, 16)}:00+08:00`;
+const count = computed(() => event.value?.description?.length || 0);
 const inputDate = (value: string) =>
   value ? new Date(Date.parse(value) + 8 * 3600000).toISOString().slice(0, 16) : '';
 function setDate(
@@ -30,19 +31,7 @@ function setDate(
   field: 'startsAt' | 'endsAt' | 'salesOpensAt' | 'registrationClosesAt',
   value: string,
 ) {
-  if (!value) {
-    session[field] = '';
-    return;
-  }
-  if (['startsAt', 'endsAt'].includes(field) && value.slice(-2) !== '00') {
-    rounding.value = {
-      session,
-      field: field as 'startsAt' | 'endsAt',
-      value: value.slice(0, -2) + '00',
-    };
-    return;
-  }
-  session[field] = `${value}:00+08:00`;
+  session[field] = value ? `${value}:00+08:00` : '';
 }
 function addType(session: Session) {
   if (session.ticketTypes.length >= 10) return;
@@ -65,10 +54,10 @@ function addSession() {
     categoryId: event.value.categoryId,
     categoryNameSnapshot: '',
     name: `第${event.value.sessions.length + 1}场`,
-    startsAt: start.toISOString(),
-    endsAt: new Date(start.getTime() + 7200000).toISOString(),
-    salesOpensAt: new Date(Date.now() + 3600000).toISOString().slice(0, 16) + ':00Z',
-    registrationClosesAt: new Date(start.getTime() - 3600000).toISOString(),
+    startsAt: beijingIso(start),
+    endsAt: beijingIso(new Date(start.getTime() + 7200000)),
+    salesOpensAt: beijingIso(new Date(Date.now() + 3600000)),
+    registrationClosesAt: beijingIso(new Date(start.getTime() - 3600000)),
     location: '',
     capacity: 100,
     ticketTypes: [],
@@ -99,9 +88,11 @@ async function load() {
     if (route.path.endsWith('/new')) {
       const created = await post<CampusEvent>('/organizer/events');
       await router.replace(`/organizer/events/${created.id}/edit`);
+      window.location.reload();
       return;
     }
     event.value = await get<CampusEvent>(`/organizer/events/${route.params.eventId}`);
+    proposedCategory.value = event.value.proposedCategoryName || '';
     if (event.value.status !== 'DRAFT') throw new Error('此活动不在草稿状态，请返回工作台管理');
   } catch (e) {
     error.value = e instanceof Error ? e.message : '无法加载草稿';
@@ -133,6 +124,7 @@ async function save(submit = false) {
       expectedVersion: e.version,
       name: e.name || null,
       categoryId: e.categoryId || null,
+      proposedCategoryName: e.categoryId ? null : proposedCategory.value.trim() || null,
       description: e.description || null,
       sessions,
     });
@@ -182,10 +174,20 @@ onMounted(load);
         </div>
         <div class="form-field">
           <label for="event-category">活动类别</label
-          ><select id="event-category" v-model="event.categoryId">
+          ><select id="event-category" v-model="event.categoryId" @change="proposedCategory = ''">
             <option value="">请选择类别</option>
             <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
           </select>
+          <input
+            id="event-proposed-category"
+            v-model="proposedCategory"
+            maxlength="60"
+            placeholder="没有合适的类别？在这里提出新类别"
+            @input="event.categoryId = ''"
+          />
+          <small
+            >活动类别和新类别名称二选一；提出的新类别会随活动申请提交，管理员审核时创建并归入。</small
+          >
         </div>
         <div class="form-field span-two">
           <label for="event-description"
@@ -204,8 +206,7 @@ onMounted(load);
           v-else
           :src="poster"
           alt="海报本地预览" /><span style="display: block; margin-top: 8px">活动海报 · 可选</span
-        ><small>JPEG / PNG，最多5,000,000字节；选择后与草稿保存；演示模式存入本机浏览器</small
-        ><input
+        ><small>JPEG 或 PNG，不超过 5MB；选择后会随草稿一起保存</small> ><input
           type="file"
           accept="image/jpeg,image/png"
           aria-label="选择海报预览"
@@ -225,12 +226,13 @@ onMounted(load);
     <section class="panel">
       <div class="form-section-head">
         <h2><span class="section-index">02</span>场次与票种</h2>
-        <span class="muted" style="font-size: 11px">{{ event.sessions.length }} / 20 场</span>
+        <span class="muted" style="font-size: 13px">{{ event.sessions.length }} / 20 场</span>
       </div>
       <div class="alert info">
         <AppIcon name="Clock3" />
         <p>
-          场次时间精确到小时，放票时间精确到分钟。每场票种容量总和不得超过场次容量；价格使用整数角保存，支持免费预约。
+          场次开始、结束、放票和报名截止都可以精确到分钟；秒必须为
+          0。每场所有票种的容量相加不能超过场次容量；价格精确到 0.1 元，可以设为免费。
         </p>
       </div>
       <div v-for="(s, index) in event.sessions" :key="s.id" class="draft-session">
@@ -291,13 +293,13 @@ onMounted(load);
           </div>
           <div class="divider" />
           <div class="section-title">
-            <h3 style="font-size: 13px">票种设置</h3>
-            <span class="muted" style="font-size: 10px"
+            <h3 style="font-size: 15px">票种设置</h3>
+            <span class="muted" style="font-size: 12.5px"
               >总容量 {{ s.ticketTypes.reduce((n, t) => n + Number(t.capacity || 0), 0) }} /
               {{ s.capacity }}</span
             >
           </div>
-          <div class="ticket-type-row" style="font-size: 10px; color: #999f88">
+          <div class="ticket-type-row" style="font-size: 12px; color: #5f6a5c">
             <span>票种名称</span><span>容量</span><span>价格（元）</span><span />
           </div>
           <div v-for="(t, ti) in s.ticketTypes" :key="t.id" class="ticket-type-row">
@@ -351,7 +353,7 @@ onMounted(load);
     </section>
     <p v-if="task.error.value" class="error-inline" role="alert">{{ task.error.value }}</p>
     <div class="sticky-actions">
-      <p>提交审核前将检查所有必填字段、结构与时间关系。</p>
+      <p>提交前会检查必填项、场次结构和时间先后关系。</p>
       <div class="button-row">
         <button class="btn secondary" :disabled="task.busy.value" @click="save(false)">
           保存草稿</button
@@ -361,23 +363,6 @@ onMounted(load);
             :size="15"
           />
         </button>
-      </div></div></template
-  ><AppModal :open="!!rounding" title="确认调整到整小时" @close="rounding = undefined"
-    ><p>
-      场次起止精确到小时。所选时间将向下取整为
-      {{ rounding?.value.replace('T', ' ') }}，确认后才应用此值。
-    </p>
-    <div class="button-row">
-      <button class="btn secondary" @click="rounding = undefined">取消</button
-      ><button
-        class="btn primary"
-        @click="
-          if (rounding) rounding.session[rounding.field] = rounding.value + ':00+08:00';
-          rounding = undefined;
-        "
-      >
-        确认使用整点
-      </button>
-    </div></AppModal
-  >
+      </div></div
+  ></template>
 </template>

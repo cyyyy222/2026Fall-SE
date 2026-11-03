@@ -152,16 +152,30 @@ public class IdentityUseCases {
                           UserEntity.class,
                           and(
                               nil("deletedAtMs"),
-                              or(
-                                  eq("usernameNormalized", normalize(r.username())),
-                                  r.email() == null
-                                      ? null
-                                      : eq("emailNormalized", normalize(r.email())),
-                                  and(
-                                      currentPhoneFilter(phone.id()),
-                                      eq("role", r.role().name())))))
+                              eq("usernameNormalized", normalize(r.username()))))
                   == 0,
-              "用户名、邮箱或当前角色的手机号已被占用");
+              "用户名已存在，请换一个用户名");
+          valid(
+              r.email() == null
+                  || r.email().isBlank()
+                  || b.db()
+                          .count(
+                              UserEntity.class,
+                              and(
+                                  nil("deletedAtMs"),
+                                  eq("emailNormalized", normalize(r.email()))))
+                      == 0,
+              "这个邮箱已被其他账号使用");
+          valid(
+              b.db()
+                      .count(
+                          UserEntity.class,
+                          and(
+                              nil("deletedAtMs"),
+                              currentPhoneFilter(phone.id()),
+                              eq("role", r.role().name())))
+                  == 0,
+              "该手机号已经注册过当前角色，请直接登录或找回密码");
           UserEntity u =
               new UserEntity(
                   id(),
@@ -471,7 +485,9 @@ public class IdentityUseCases {
         RestrictionKind.valueOf(r.kind()),
         b.time(r.startsAtMs()),
         b.time(r.endsAtMs()),
-        r.reason());
+        r.reason(),
+        r.source(),
+        b.now() >= r.startsAtMs() && b.now() < r.endsAtMs() && r.revokedAtMs() == null);
   }
 
   public UseCaseResult<Views.Identity> currentUser(RequestContext c) {

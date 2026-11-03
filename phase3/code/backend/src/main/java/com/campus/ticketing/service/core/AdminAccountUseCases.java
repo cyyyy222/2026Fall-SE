@@ -145,6 +145,7 @@ public class AdminAccountUseCases {
                   "ACCOUNT",
                   i -> managed(b.need(UserEntity.class, i, false)),
                   () -> {
+                    valid(!r.username().isBlank(), "用户名不能为空");
                     valid(
                         b.db()
                                 .count(
@@ -153,7 +154,7 @@ public class AdminAccountUseCases {
                                         eq("usernameNormalized", normalize(r.username())),
                                         nil("deletedAtMs")))
                             == 0,
-                        "用户名已存在");
+                        "用户名已存在，请换一个用户名");
                     UUID uid = id();
                     b.db()
                         .insert(
@@ -198,14 +199,6 @@ public class AdminAccountUseCases {
           b.actor(c, Role.ADMIN);
           var target = b.need(UserEntity.class, accountId, false);
           var old = assignment(accountId);
-          if (old != null && EventUseCases.present(r.assignedSessionId()))
-            valid(
-                b.need(EventSessionEntity.class, old.sessionId(), false)
-                    .eventId()
-                    .equals(
-                        b.need(EventSessionEntity.class, r.assignedSessionId().value(), false)
-                            .eventId()),
-                "检票账号不得跨活动改绑");
           if (old != null) configurableForRemoval(old.sessionId());
           if (EventUseCases.present(r.assignedSessionId()))
             configurable(r.assignedSessionId().value());
@@ -236,11 +229,7 @@ public class AdminAccountUseCases {
                             && (old == null
                                 || !old.sessionId().equals(r.assignedSessionId().value()));
                     if (moving) {
-                      valid(u.role().equals("CHECKER") && old != null, "只有当前检票账号可以同活动改绑");
-                      var a = b.need(EventSessionEntity.class, old.sessionId(), false);
-                      var z =
-                          b.need(EventSessionEntity.class, r.assignedSessionId().value(), false);
-                      valid(a.eventId().equals(z.eventId()), "检票账号不得跨活动改绑");
+                      valid(u.role().equals("CHECKER") && old != null, "该检票账号已失效或未绑定场次，请新建账号后再分配");
                     }
                     protect(u, !enabled || moving);
                     if (moving) {

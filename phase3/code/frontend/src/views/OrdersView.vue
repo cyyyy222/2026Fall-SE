@@ -15,7 +15,7 @@ const tab = ref('');
 const tabs = [
   ['', '全部订单'],
   ['UNPAID', '待支付'],
-  ['WAITLIST', '候补与递补'],
+  ['WAITLIST', '候补进度'],
   ['REGISTERED', '待参加'],
   ['HISTORY', '历史订单'],
 ];
@@ -76,15 +76,19 @@ onMounted(load);
       </div>
       <div class="order-item-body">
         <div class="order-thumb">
-          <PosterArt
-            :variant="i + 1"
-            :title="order.event.eventName"
-            :category="order.event.categoryNameSnapshot"
-          />
+          <RouterLink :to="`/events/${order.event.eventId}`">
+            <PosterArt
+              :variant="i + 1"
+              :title="order.event.eventName"
+              :category="order.event.categoryNameSnapshot"
+            />
+          </RouterLink>
         </div>
         <div class="order-item-info">
           <h3>
-            <RouterLink :to="`/orders/${order.id}`">{{ order.event.eventName }}</RouterLink>
+            <RouterLink :to="`/events/${order.event.eventId}`">{{
+              order.event.eventName
+            }}</RouterLink>
           </h3>
           <p><AppIcon name="CalendarDays" :size="13" />{{ dateTime(order.event.startsAt) }}</p>
           <p><AppIcon name="MapPin" :size="13" />{{ order.event.location }}</p>
@@ -101,7 +105,7 @@ onMounted(load);
               class="btn primary small"
               >查看电子票</RouterLink
             ><RouterLink
-              v-else
+              v-else-if="['UNPAID', 'WAITLISTED', 'OFFERED'].includes(order.status)"
               :to="`/orders/${order.id}/${order.status === 'UNPAID' ? 'pay' : 'waitlist'}`"
               class="btn primary small"
               >{{ order.status === 'UNPAID' ? '继续支付' : '查看候补' }}</RouterLink
@@ -111,7 +115,7 @@ onMounted(load);
       </div>
     </article>
     <p class="field-help">
-      已结束或终止活动的本人订单仍可查看；历史票据不受名单、统计7天保留期影响。
+      活动结束或终止后，你的订单和电子票仍可查看；活动名单与统计只保留 7 天，不影响你的历史票据。
     </p></template
   >
 </template>

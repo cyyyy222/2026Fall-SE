@@ -15,7 +15,10 @@ const ticketId = ref('');
 const context = ref<{ session: Session; checkinOpensAt: string; checkinClosesAt: string }>();
 const preview = ref<{
   ticketId: string;
+  userId: string;
+  username: string;
   attendeeName: string;
+  phone: string | null;
   sessionName: string;
   ticketTypeName: string;
   alreadyChecked: boolean;
@@ -67,19 +70,20 @@ onMounted(load);
         当前授权：{{ context.session.eventName }} · {{ context.session.name }}<br />验票窗口：{{
           dateTime(context.checkinOpensAt)
         }}
-        — {{ dateTime(context.checkinClosesAt) }}；窗口含起点，不含终点。
+        — {{ dateTime(context.checkinClosesAt) }}；活动开始前 2
+        小时开放，活动进行到一半时停止受理（开始时刻可验，结束时刻起不再受理）。
       </p>
     </div>
     <section class="panel scanner-card">
       <div class="scanner-symbol"><AppIcon name="ScanLine" :size="35" /></div>
       <h2>准备迎接下一位参与者</h2>
-      <p>输入电子票 id，核对姓名和票档后再确认签到。</p>
+      <p>输入电子票号，核对姓名和票档后再确认签到。</p>
       <form class="scanner-form" @submit.prevent="check">
         <input
           v-model="ticketId"
           required
-          aria-label="电子票 id"
-          placeholder="请输入完整票号（UUID）"
+          aria-label="电子票号"
+          placeholder="粘贴或输入完整电子票号"
           autocomplete="off"
           @input="
             preview = undefined;
@@ -99,7 +103,21 @@ onMounted(load);
         </div>
         <div class="info-list">
           <div class="info-row">
-            <span>姓名</span><strong>{{ preview.attendeeName }}</strong>
+            <span>参与人姓名</span><strong>{{ preview.attendeeName }}</strong>
+          </div>
+          <div class="info-row">
+            <span>用户名</span><strong>{{ preview.username }}</strong>
+          </div>
+          <div class="info-row">
+            <span>手机号</span><strong>{{ preview.phone || '—' }}</strong>
+          </div>
+          <div class="info-row">
+            <span>用户 ID</span
+            ><strong class="mono" style="font-size: 12px">{{ preview.userId }}</strong>
+          </div>
+          <div class="info-row">
+            <span>电子票号</span
+            ><strong class="mono" style="font-size: 12px">{{ preview.ticketId }}</strong>
           </div>
           <div class="info-row">
             <span>场次</span><strong>{{ preview.sessionName }}</strong>
@@ -132,7 +150,9 @@ onMounted(load);
         </button>
       </div>
       <div class="divider" />
-      <p class="field-help">无权限时不会显示持票人信息。重复验票仅返回首次结果；不支持撤销验票。</p>
+      <p class="field-help">
+        没有权限时不会显示持票人信息。同一张票重复核对只显示第一次的签到结果，签到不能撤销。
+      </p>
     </section>
     <section class="panel" style="margin-top: 24px">
       <div class="panel-heading">
@@ -140,7 +160,7 @@ onMounted(load);
         <span class="tag">仅正常结束后</span>
       </div>
       <p class="field-help">
-        仅在场次正常结束、账号仍可用且当前授权未撤销时补做缺席漏标，不提前标记、不撤销验票。
+        场次正常结束后，如果发现有人漏标，可以补记缺席。此操作不会提前标记，也不会撤销已完成的签到；账号停用或授权撤销后不能再补。
       </p>
       <button
         class="btn secondary small"
@@ -148,8 +168,15 @@ onMounted(load);
         :disabled="task.busy.value || Date.now() < Date.parse(context.session.endsAt)"
         @click="reconcile"
       >
-        补做结束缺席标记
+        补记未签到者为缺席
       </button>
+      <p
+        v-if="Date.now() < Date.parse(context.session.endsAt)"
+        class="field-help"
+        style="margin-top: 10px"
+      >
+        场次结束后才能使用这个操作。
+      </p>
     </section>
     <div class="manage-nav">
       <RouterLink to="/checker/attendees"

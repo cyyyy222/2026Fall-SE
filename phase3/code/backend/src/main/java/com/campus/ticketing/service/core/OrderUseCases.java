@@ -116,12 +116,17 @@ public class OrderUseCases {
         e.status().equals("PUBLISHED")
             && b.effectiveEnd(e) == null
             && b.now() < s.registrationClosesAtMs();
+    boolean pendingOpen =
+        e.status().equals("PUBLISHED")
+            && b.effectiveEnd(e) == null
+            && b.now() < checkinClose(s);
     List<String> actions = new ArrayList<>();
-    if (open && List.of("WAITLISTED", "OFFERED", "UNPAID").contains(o.status()))
+    if (pendingOpen && List.of("WAITLISTED", "OFFERED", "UNPAID").contains(o.status()))
       actions.add("CANCEL");
-    if (open && o.status().equals("OFFERED") && b.now() < o.confirmDeadlineMs())
+    if (pendingOpen && o.status().equals("OFFERED") && b.now() < o.confirmDeadlineMs())
       actions.add("CONFIRM_PROMOTION");
-    if (open && o.status().equals("UNPAID") && b.now() < o.payDeadlineMs()) actions.add("PAY");
+    if (pendingOpen && o.status().equals("UNPAID") && b.now() < o.payDeadlineMs())
+      actions.add("PAY");
     if (o.status().equals("REGISTERED")) {
       if (active != null) {
         actions.add("REVOKE_REFUND");
@@ -265,7 +270,7 @@ public class OrderUseCases {
                     b.now(),
                     0L);
             b.db().insert(existing);
-            expiry(existing, space ? existing.payDeadlineMs() : s.registrationClosesAtMs());
+            expiry(existing, space ? existing.payDeadlineMs() : checkinClose(s));
           }
           b.db()
               .insert(
@@ -283,6 +288,17 @@ public class OrderUseCases {
     require(b.now() >= s.salesOpensAtMs(), "SALES_NOT_OPEN", "尚未放票");
     require(b.now() < s.registrationClosesAtMs(), "REGISTRATION_CLOSED", "报名已截止");
     if (type != null) require(!type.saleStopped(), "SALE_STOPPED", "票种已停售");
+  }
+
+  /** 候补、递补确认与支付可以持续到验票结束；结束后一律失效。 */
+  private long checkinClose(EventSessionEntity s) {
+    return DomainRules.checkinClose(s.startsAtMs(), s.endsAtMs());
+  }
+
+  private void pendingWindow(EventEntity e, EventSessionEntity s) {
+    require(
+        e.status().equals("PUBLISHED") && b.effectiveEnd(e) == null, "EVENT_TERMINATED", "活动已终止");
+    require(b.now() < checkinClose(s), "CHECKIN_ENDED", "验票已结束，候补与支付已失效");
   }
 
   public UseCaseResult<Views.RegistrationResult> findByRequest(RequestContext c, UUID requestId) {
@@ -345,10 +361,9 @@ public class OrderUseCases {
                   i -> order(b.need(OrderEntity.class, i, false)),
                   () -> {
                     var current = b.need(OrderEntity.class, orderId, true);
-                    open(
+                    pendingWindow(
                         b.need(EventEntity.class, current.eventId(), false),
-                        b.need(EventSessionEntity.class, current.sessionId(), false),
-                        null);
+                        b.need(EventSessionEntity.class, current.sessionId(), false));
                     require(
                         List.of("WAITLISTED", "OFFERED", "UNPAID").contains(current.status()),
                         "STATE_CONFLICT",
@@ -402,7 +417,7 @@ public class OrderUseCases {
                   () -> {
                     var o = b.need(OrderEntity.class, orderId, true);
                     var s = b.need(EventSessionEntity.class, o.sessionId(), false);
-                    open(b.need(EventEntity.class, o.eventId(), false), s, null);
+                    pendingWindow(b.need(EventEntity.class, o.eventId(), false), s);
                     require(o.status().equals("OFFERED"), "STATE_CONFLICT", "订单不在待确认状态");
                     require(b.now() < o.confirmDeadlineMs(), "PROMOTION_EXPIRED", "递补确认已过期");
                     var confirmed =
@@ -411,7 +426,7 @@ public class OrderUseCases {
                             "status",
                             "UNPAID",
                             "payDeadlineMs",
-                            DomainRules.payDeadline(b.now(), s.registrationClosesAtMs()),
+                            DomainRules.payDeadline(b.now(), checkinClose(s)),
                             "updatedAtMs",
                             b.now(),
                             "version",
@@ -512,7 +527,7 @@ public class OrderUseCases {
                     .orElse(null);
           if (previous != null) return ok(paymentResult(previous, true));
           var s = b.need(EventSessionEntity.class, o.sessionId(), false);
-          open(b.need(EventEntity.class, o.eventId(), false), s, null);
+          pendingWindow(b.need(EventEntity.class, o.eventId(), false), s);
           require(o.status().equals("UNPAID"), "STATE_CONFLICT", "订单不是待支付状态");
           require(b.now() < o.payDeadlineMs(), "PAYMENT_EXPIRED", "支付已过期");
           var outcome = simulator.pay(o.amountJiao());

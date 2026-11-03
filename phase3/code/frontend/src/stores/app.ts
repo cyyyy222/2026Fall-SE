@@ -8,6 +8,7 @@ export const useAppStore = defineStore('app', () => {
   const user = ref<User | null>(null);
   const initialized = ref(false);
   const notification = ref<{ message: string; type: 'success' | 'error' } | null>(null);
+  const unreadMessages = ref(0);
   let notificationTimer: ReturnType<typeof setTimeout>;
   const home = computed(() =>
     user.value?.role === 'ORGANIZER'
@@ -34,13 +35,28 @@ export const useAppStore = defineStore('app', () => {
     if (initialized.value) return;
     try {
       user.value = await get<User>('/me');
+      await refreshUnreadMessages();
     } catch {
       user.value = null;
+      unreadMessages.value = 0;
     }
     initialized.value = true;
   }
+  async function refreshUnreadMessages() {
+    if (!user.value) {
+      unreadMessages.value = 0;
+      return;
+    }
+    try {
+      const result = await get<{ count: number }>('/me/messages/unread-count');
+      unreadMessages.value = Number(result.count) || 0;
+    } catch {
+      // A failed count must not hide existing navigation or invent unread state.
+    }
+  }
   async function login(username: string, password: string) {
     user.value = await post<User>('/auth/login', { username, password });
+    await refreshUnreadMessages();
     return home.value;
   }
   async function phoneLogin(input: {
@@ -51,6 +67,7 @@ export const useAppStore = defineStore('app', () => {
     purpose: 'LOGIN' | 'REGISTER';
   }) {
     user.value = await post<User>('/auth/phone-login', input);
+    await refreshUnreadMessages();
     return home.value;
   }
   async function logout() {
@@ -58,16 +75,19 @@ export const useAppStore = defineStore('app', () => {
       await post('/auth/logout');
     } finally {
       user.value = null;
+      unreadMessages.value = 0;
     }
   }
   return {
     user,
     initialized,
     notification,
+    unreadMessages,
     home,
     toast,
     error,
     initialize,
+    refreshUnreadMessages,
     login,
     phoneLogin,
     logout,

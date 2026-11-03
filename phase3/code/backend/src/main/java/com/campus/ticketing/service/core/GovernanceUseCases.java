@@ -57,34 +57,41 @@ public class GovernanceUseCases {
                   "REPORT",
                   i -> report(b.need(ReportEntity.class, i, false)),
                   () -> {
-                    require(
-                        e.status().equals("PUBLISHED") && b.effectiveEnd(e) == null
-                            || b.db()
-                                    .count(
-                                        OrderEntity.class,
-                                        and(eq("userId", u.id()), eq("sessionId", s.id())))
-                                > 0,
-                        "EVENT_NOT_PUBLIC",
-                        "只能举报公开场次或本人有关联的历史场次");
+                    Long endedAt = b.effectiveEnd(e);
+                    if (e.status().equals("PUBLISHED") && endedAt == null) {
+                      // Public event: any logged-in participant may report.
+                    } else {
+                      require(
+                          endedAt != null && b.now() < endedAt + 7 * DAY,
+                          "REPORT_WINDOW_CLOSED",
+                          "活动结束超过 7 天，不再受理举报");
+                      require(
+                          b.db()
+                                  .count(
+                                      OrderEntity.class,
+                                      and(
+                                          eq("userId", u.id()),
+                                          eq("eventId", e.id())))
+                              > 0,
+                          "REPORT_NOT_ELIGIBLE",
+                          "活动结束后仅限参加过该活动的参与者举报");
+                    }
                     require(
                         b.db()
                                 .count(
                                     ReportEntity.class,
-                                    and(eq("reporterId", u.id()), eq("sessionId", s.id())))
+                                    and(eq("reporterId", u.id()), eq("eventId", e.id())))
                             == 0,
                         "DUPLICATE_REPORT",
-                        "本人已举报过本场");
-                    require(
-                        b.db()
-                                .count(
-                                    ReportEntity.class,
-                                    and(
-                                        eq("reporterId", u.id()),
-                                        gt("createdAtMs", b.now() - 30 * DAY),
-                                        le("createdAtMs", b.now())))
-                            < 5,
-                        "REPORT_LIMIT_REACHED",
-                        "滚动30天最多受理5次举报");
+                        "本人已举报过该活动");
+                    if (b.db()
+                            .count(
+                                ReportEntity.class,
+                                and(
+                                    eq("reporterId", u.id()),
+                                    gt("createdAtMs", b.now() - DAY)))
+                        >= 20)
+                      throw error(429, "REPORT_DAILY_LIMIT", "举报过于频繁，请明天再试");
                     UUID report = id();
                     b.db()
                         .insert(
@@ -428,7 +435,8 @@ public class GovernanceUseCases {
                     eq("phoneIdentityId", phone.id()),
                     eq("kind", kind),
                     le("startsAtMs", b.now()),
-                    gt("endsAtMs", b.now())),
+                    gt("endsAtMs", b.now()),
+                    nil("revokedAtMs")),
                 false)
             .orElse(null);
     return new Views.RestrictionCandidate(
@@ -505,6 +513,18 @@ public class GovernanceUseCases {
       List<BehaviorFactEntity> facts,
       String reason,
       long startsAt) {
+    return restrict(c, phone, kind, facts, reason, startsAt, null, null);
+  }
+
+  private RestrictionEntity restrict(
+      RequestContext c,
+      UUID phone,
+      String kind,
+      List<BehaviorFactEntity> facts,
+      String reason,
+      long startsAt,
+      String source,
+      String sourceRef) {
     require(!b.restricted(phone, kind), "STATE_CONFLICT", "当前限制尚未到期，不延长或重新起算");
     var restriction =
         new RestrictionEntity(
@@ -515,7 +535,9 @@ public class GovernanceUseCases {
             startsAt + 15 * DAY,
             reason,
             c == null ? null : c.actor().userId(),
-            null);
+            null,
+            source,
+            sourceRef);
     b.db().insert(restriction);
     for (var fact : facts)
       b.db().insert(new RestrictionFactEntity(id(), restriction.id(), fact.id()));
@@ -556,7 +578,237 @@ public class GovernanceUseCases {
           "PUBLISH",
           facts.subList(0, 3),
           "滚动30天内三次组织者违规",
-          facts.get(2).occurredAtMs());
+          facts.get(2).occurredAtMs(),
+          "ORGANIZER_AUTO",
+          null);
+  }
+
+  public UseCaseResult<List<Views.RestrictionView>> myRestrictions(RequestContext c) {
+    return b.read(
+        () -> {
+          var u = b.actor(c, Role.PARTICIPANT);
+          var ids = phoneIds(u);
+          var rows =
+              b.ordered(
+                  RestrictionEntity.class,
+                  and(eq("kind", "REGISTER"), in("phoneIdentityId", ids)),
+                  RecordStore.Sort.desc("startsAtMs"),
+                  RecordStore.Sort.asc("id"));
+          return ok(rows.stream().map(identity::restriction).toList());
+        });
+  }
+
+  public UseCaseResult<List<Views.RestrictionAppealView>> myAppeals(RequestContext c) {
+    return b.read(
+        () -> {
+          var u = b.actor(c, Role.PARTICIPANT);
+          var rows =
+              b.ordered(
+                  RestrictionAppealEntity.class,
+                  eq("userId", u.id()),
+                  RecordStore.Sort.desc("createdAtMs"),
+                  RecordStore.Sort.asc("id"));
+          return ok(rows.stream().map(this::appealView).toList());
+        });
+  }
+
+  public UseCaseResult<Views.RestrictionAppealView> createAppeal(
+      RequestContext c, Requests.RestrictionAppeal r) {
+    return b.write(
+        () -> {
+          var u = b.actor(c, Role.PARTICIPANT);
+          var restriction = b.need(RestrictionEntity.class, r.restrictionId(), true);
+          require(
+              phoneIds(u).contains(restriction.phoneIdentityId()),
+              "OBJECT_FORBIDDEN",
+              "只能申诉本人的限制");
+          require(restriction.kind().equals("REGISTER"), "STATE_CONFLICT", "仅报名限制可以申诉");
+          require(b.now() < restriction.endsAtMs(), "STATE_CONFLICT", "限制已结束，无需申诉");
+          require(
+              b.db()
+                      .count(
+                          RestrictionAppealEntity.class,
+                          and(
+                              eq("restrictionId", restriction.id()),
+                              eq("status", "PENDING")))
+                  == 0,
+              "STATE_CONFLICT",
+              "已有待审核申诉，请等待管理员处理");
+          UUID appeal = id();
+          b.db()
+              .insert(
+                  new RestrictionAppealEntity(
+                      appeal,
+                      restriction.id(),
+                      u.id(),
+                      trim(r.reason()),
+                      trim(r.evidenceText()),
+                      "PENDING",
+                      b.now(),
+                      null,
+                      null,
+                      null,
+                      0L));
+          for (var admin :
+              b.list(
+                  UserEntity.class,
+                  and(eq("role", "ADMIN"), eq("enabled", true), nil("deletedAtMs"))))
+            b.notify(
+                admin.id(),
+                "APPEAL_SUBMITTED:" + appeal,
+                "APPEAL_SUBMITTED",
+                "新的处罚申诉",
+                "有参与者提交了缺席限制申诉，请及时审核",
+                "ACCOUNT",
+                u.id(),
+                null);
+          b.audit(c, "APPEAL_SUBMITTED", "RESTRICTION", restriction.id(), "SUCCESS", null, null);
+          return created(appealView(b.need(RestrictionAppealEntity.class, appeal, false)), false);
+        });
+  }
+
+  public UseCaseResult<PageResult<Views.RestrictionAppealView>> listAppeals(
+      RequestContext c, Queries.RestrictionAppeals q) {
+    return b.read(
+        () -> {
+          b.actor(c, Role.ADMIN);
+          var rows =
+              b.ordered(
+                  RestrictionAppealEntity.class,
+                  q.status() == null ? null : eq("status", q.status().name()),
+                  RecordStore.Sort.desc("createdAtMs"),
+                  RecordStore.Sort.asc("id"));
+          return ok(page(rows.stream().map(this::appealView).toList(), q.page(), q.pageSize()));
+        });
+  }
+
+  public UseCaseResult<Views.RestrictionAppealView> resolveAppeal(
+      RequestContext c, UUID appealId, Requests.ResolveAppeal r) {
+    return b.write(
+        () -> {
+          b.actor(c, Role.ADMIN);
+          require(r.decision() != AppealStatus.PENDING, "VALIDATION_FAILED", "请选择通过或驳回");
+          var a = b.need(RestrictionAppealEntity.class, appealId, true);
+          require(a.status().equals("PENDING"), "STATE_CONFLICT", "该申诉已处理");
+          if (r.decision() == AppealStatus.APPROVED) {
+            var restriction = b.need(RestrictionEntity.class, a.restrictionId(), true);
+            b.db()
+                .save(
+                    copy(
+                        restriction,
+                        "revokedAtMs",
+                        b.now(),
+                        "endedMessageAtMs",
+                        b.now()));
+          }
+          b.db()
+              .save(
+                  copy(
+                      a,
+                      "status",
+                      r.decision().name(),
+                      "reviewedBy",
+                      c.actor().userId(),
+                      "reviewedAtMs",
+                      b.now(),
+                      "decisionNote",
+                      trim(r.note()),
+                      "version",
+                      a.version() + 1));
+          b.notify(
+              a.userId(),
+              "APPEAL:" + a.id(),
+              "APPEAL_RESULT",
+              "申诉结果",
+              r.decision() == AppealStatus.APPROVED
+                  ? "申诉通过，15天限制已解除"
+                  : "申诉未通过：" + trim(r.note()),
+              "ACCOUNT",
+              a.userId(),
+              null);
+          b.audit(c, "APPEAL_RESOLVED", "RESTRICTION", a.restrictionId(), "SUCCESS", null, null);
+          return ok(appealView(b.need(RestrictionAppealEntity.class, appealId, false)));
+        });
+  }
+
+  /**
+   * 每周一 00:00（北京时间）扫描上一自然周：3次缺席自动限制15天，2次发送预警。
+   */
+  public void weeklyAbsenceScan(long weekStart, long weekEnd) {
+    for (var phone : b.read(() -> b.list(PhoneIdentityEntity.class, null)))
+      b.write(
+          () -> {
+            if (b.restricted(phone.id(), "REGISTER")) return null;
+            var facts =
+                b.list(
+                    BehaviorFactEntity.class,
+                    and(
+                        eq("phoneIdentityId", phone.id()),
+                        eq("type", "NATURAL_ABSENCE"),
+                        ge("occurredAtMs", weekStart),
+                        lt("occurredAtMs", weekEnd)));
+            if (facts.size() >= 3) {
+              if (b.db()
+                      .count(
+                          RestrictionEntity.class,
+                          and(
+                              eq("phoneIdentityId", phone.id()),
+                              eq("source", "WEEKLY_ABSENCE"),
+                              eq("sourceRef", Long.toString(weekStart))))
+                  == 0)
+                restrict(
+                    null,
+                    phone.id(),
+                    "REGISTER",
+                    facts,
+                    "一周内缺席3次（自动扫描）",
+                    b.now(),
+                    "WEEKLY_ABSENCE",
+                    Long.toString(weekStart));
+            } else if (facts.size() == 2) {
+              for (var user :
+                  b.list(
+                      UserEntity.class,
+                      and(
+                          eq("phoneIdentityId", phone.id()),
+                          eq("role", "PARTICIPANT"),
+                          nil("deletedAtMs"))))
+                b.notify(
+                    user.id(),
+                    "ABSENCE_WARNING:" + phone.id() + ":" + weekStart,
+                    "ABSENCE_WARNING",
+                    "本周已缺席2次",
+                    "再缺席1次将触发15天报名限制；如因特殊情况缺席，可在申诉页说明。",
+                    "ACCOUNT",
+                    user.id(),
+                    null);
+            }
+            return null;
+          });
+  }
+
+  private java.util.Set<UUID> phoneIds(UserEntity u) {
+    var ids = new java.util.HashSet<UUID>();
+    if (u.phoneIdentityId() != null) ids.add(u.phoneIdentityId());
+    if (u.loginPhoneIdentityId() != null) ids.add(u.loginPhoneIdentityId());
+    return ids;
+  }
+
+  private Views.RestrictionAppealView appealView(RestrictionAppealEntity a) {
+    var restriction = b.need(RestrictionEntity.class, a.restrictionId(), false);
+    var owner = b.need(UserEntity.class, a.userId(), false);
+    return new Views.RestrictionAppealView(
+        a.id(),
+        a.restrictionId(),
+        a.userId(),
+        owner.username(),
+        a.reason(),
+        a.evidenceText(),
+        AppealStatus.valueOf(a.status()),
+        b.time(a.createdAtMs()),
+        b.time(a.reviewedAtMs()),
+        a.decisionNote(),
+        identity.restriction(restriction));
   }
 
   public void reconcileDue(UUID jobId) {
@@ -622,7 +874,14 @@ public class GovernanceUseCases {
                     require(
                         absent >= 3 || refund >= 5, "STATE_CONFLICT", "需至少3次正常缺席或5次主动成功退款，不能混加阈值");
                     return restrict(
-                            c, r.phoneIdentityId(), "REGISTER", selected, trim(r.reason()), b.now())
+                            c,
+                            r.phoneIdentityId(),
+                            "REGISTER",
+                            selected,
+                            trim(r.reason()),
+                            b.now(),
+                            "ADMIN",
+                            null)
                         .id();
                   });
           return created(x.current(), x.replayed());
@@ -674,8 +933,24 @@ public class GovernanceUseCases {
         });
   }
 
-  public UseCaseResult<Views.MessageView> messageDetail(RequestContext c, UUID messageId) {
-    return b.read(() -> ok(message(ownMessage(c, messageId, false))));
+  public UseCaseResult<Views.UnreadCount> unreadCount(RequestContext c) {
+    return b.read(
+        () -> {
+          var u = b.actor(c);
+          int count =
+              (int)
+                  b.db()
+                      .count(
+                          MessageEntity.class,
+                          and(
+                              eq("recipientId", u.id()),
+                              gt("expiresAtMs", b.now()),
+                              nil("readAtMs")));
+          return ok(new Views.UnreadCount(count));
+        });
+  }
+
+  public UseCaseResult<Views.MessageView> messageDetail(RequestContext c, UUID messageId) {    return b.read(() -> ok(message(ownMessage(c, messageId, false))));
   }
 
   public UseCaseResult<Mutation<Views.MessageView>> markRead(

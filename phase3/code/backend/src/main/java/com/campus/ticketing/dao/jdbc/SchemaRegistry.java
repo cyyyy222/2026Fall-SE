@@ -33,6 +33,7 @@ public final class SchemaRegistry {
           Map.entry(BehaviorFactEntity.class, "behavior_facts"),
           Map.entry(RestrictionEntity.class, "restrictions"),
           Map.entry(RestrictionFactEntity.class, "restriction_facts"),
+          Map.entry(RestrictionAppealEntity.class, "restriction_appeals"),
           Map.entry(OperationRecordEntity.class, "operation_records"),
           Map.entry(MessageEntity.class, "messages"),
           Map.entry(AuditLogEntity.class, "audit_logs"),

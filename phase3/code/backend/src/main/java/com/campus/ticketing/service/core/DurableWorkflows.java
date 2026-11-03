@@ -11,6 +11,7 @@ import com.campus.ticketing.dto.requests.Requests;
 import com.campus.ticketing.dto.views.Views;
 import com.campus.ticketing.entity.*;
 import com.campus.ticketing.enums.*;
+import java.time.*;
 import java.util.*;
 import java.util.function.*;
 import org.springframework.beans.factory.ObjectProvider;
@@ -460,7 +461,7 @@ public class DurableWorkflows {
           if (!e.status().equals("PUBLISHED")
               || b.effectiveEnd(e) != null
               || b.now() < s.salesOpensAtMs()
-              || b.now() >= s.registrationClosesAtMs()
+              || b.now() >= DomainRules.checkinClose(s.startsAtMs(), s.endsAtMs())
               || type.saleStopped()) return null;
           var waiters = orders.waiting(typeId);
           var users = new TreeSet<UUID>(Comparator.comparing(UUID::toString));
@@ -473,7 +474,9 @@ public class DurableWorkflows {
             if (slots <= 0) break;
             var o = b.need(OrderEntity.class, initial.id(), true);
             if (!o.status().equals("WAITLISTED") || !orders.eligibleWaiter(o)) continue;
-            long deadline = DomainRules.promotionDeadline(b.now(), s.registrationClosesAtMs());
+            long deadline =
+                DomainRules.promotionDeadline(
+                    b.now(), DomainRules.checkinClose(s.startsAtMs(), s.endsAtMs()));
             var offered =
                 copy(
                     o,
@@ -514,17 +517,17 @@ public class DurableWorkflows {
           var s = b.need(EventSessionEntity.class, o.sessionId(), false);
           boolean expire =
               List.of("WAITLISTED", "OFFERED", "UNPAID").contains(o.status())
-                  && (b.now() >= s.registrationClosesAtMs()
+                  && (b.now() >= DomainRules.checkinClose(s.startsAtMs(), s.endsAtMs())
                       || o.status().equals("OFFERED") && b.now() >= o.confirmDeadlineMs()
                       || o.status().equals("UNPAID") && b.now() >= o.payDeadlineMs());
           if (expire) {
-            orders.status(o, "CANCELLED", "名额确认/支付/报名期限已到");
+            orders.status(o, "CANCELLED", "候补/确认/支付期限已到或验票已结束");
             b.notify(
                 o.userId(),
                 "CANCEL:" + o.id(),
                 "ORDER_CANCELLED",
                 "订单已过期",
-                "名额确认/支付/报名期限已到",
+                "候补/确认/支付期限已到，或验票已结束",
                 "ORDER",
                 o.id(),
                 null);
@@ -673,7 +676,7 @@ public class DurableWorkflows {
                             s.endsAtMs())));
                 return null;
               });
-        if (b.now() < s.registrationClosesAtMs())
+        if (b.now() < DomainRules.checkinClose(s.startsAtMs(), s.endsAtMs()))
           for (var t : b.read(() -> b.types(s.id())))
             if (!t.saleStopped())
               b.write(
@@ -711,6 +714,37 @@ public class DurableWorkflows {
                 List.of(b.item(type, type, null, null, Map.of(), b.now())));
             return null;
           });
+    var local = b.time(b.now());
+    if (local.getDayOfWeek() == DayOfWeek.MONDAY) {
+      long weekStart =
+          local
+              .toLocalDate()
+              .minusWeeks(1)
+              .atStartOfDay()
+              .atOffset(ZoneOffset.ofHours(8))
+              .toInstant()
+              .toEpochMilli();
+      long weekEnd = weekStart + 7 * DAY;
+      long dueAt = local.getHour() == 0 && local.getMinute() < 5 ? b.now() + 5 * 60_000L : b.now();
+      b.write(
+          () -> {
+            b.enqueue(
+                "JOB-07",
+                "WEEKLY_ABSENCE:" + weekStart,
+                null,
+                dueAt,
+                dueAt + 3_600_000,
+                List.of(
+                    b.item(
+                        "ABSENCE_SCAN",
+                        "WEEKLY_ABSENCE",
+                        null,
+                        null,
+                        Map.of("weekStart", weekStart, "weekEnd", weekEnd),
+                        dueAt)));
+            return null;
+          });
+    }
   }
 
   private long expiryDeadline(OrderEntity order, EventSessionEntity session) {
@@ -721,8 +755,9 @@ public class DurableWorkflows {
           default -> null;
         };
     return ownDeadline == null
-        ? session.registrationClosesAtMs()
-        : Math.min(ownDeadline, session.registrationClosesAtMs());
+        ? DomainRules.checkinClose(session.startsAtMs(), session.endsAtMs())
+        : Math.min(
+            ownDeadline, DomainRules.checkinClose(session.startsAtMs(), session.endsAtMs()));
   }
 
   private final ThreadLocal<String> activeLease = new ThreadLocal<>();
@@ -830,6 +865,12 @@ public class DurableWorkflows {
           case "EXPORT" -> reporting.getObject().generatePending(itemPayloadId(item));
           case "JOB-05" -> cleanup();
           case "JOB-06" -> governance.getObject().reconcileDue(jobId);
+          case "WEEKLY_ABSENCE" ->
+              governance
+                  .getObject()
+                  .weeklyAbsenceScan(
+                      Long.parseLong(payload(item, "weekStart")),
+                      Long.parseLong(payload(item, "weekEnd")));
           default -> throw new IllegalStateException("Unknown durable item kind");
         }
         b.write(

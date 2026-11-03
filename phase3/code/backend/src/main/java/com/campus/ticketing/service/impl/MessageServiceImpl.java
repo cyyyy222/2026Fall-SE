@@ -37,6 +37,11 @@ public class MessageServiceImpl implements MessageService {
   }
 
   @Override
+  public UseCaseResult<Views.UnreadCount> unreadCount(RequestContext context) {
+    return governanceUseCases.unreadCount(context);
+  }
+
+  @Override
   public UseCaseResult<Mutation<Views.MessageView>> markRead(
       RequestContext context, UUID messageId, Requests.Empty request) {
     return governanceUseCases.markRead(context, messageId, request);

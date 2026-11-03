@@ -30,14 +30,14 @@ const menus = computed(() =>
       : [
           ['/admin/reviews', 'ClipboardCheck', '活动审核'],
           ['/admin/events', 'CalendarDays', '活动管理'],
-          ['/admin/accounts', 'UsersRound', '账号与授权'],
+          ['/admin/accounts', 'UsersRound', '账号分类管理'],
           ['/admin/categories', 'List', '活动类别'],
           ['/admin/reports', 'ShieldCheck', '举报与核查'],
-          ['/admin/restrictions', 'LockKeyhole', '业务限制'],
+          ['/admin/restrictions', 'LockKeyhole', '报名与发布限制'],
           ['/admin/payments', 'Ticket', '支付与退款'],
-          ['/admin/audit', 'FileText', '操作审计'],
-          ['/admin/jobs', 'RefreshCw', '持久任务'],
-          ['/admin/recoveries', 'HelpCircle', '人工找回'],
+          ['/admin/audit', 'FileText', '操作记录'],
+          ['/admin/jobs', 'RefreshCw', '后台处理进度'],
+          ['/admin/recoveries', 'HelpCircle', '账号找回申请'],
         ],
 );
 const activeMenu = (path: string) =>

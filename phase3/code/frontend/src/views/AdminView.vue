@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { get, patch, post, query, request } from '../api/client';
-import type { CampusEvent, Page } from '../types';
+import type { CampusEvent, Page, Role } from '../types';
 import { useTask } from '../composables/useTask';
 import { useAppStore } from '../stores/app';
 import { dateTime, label, money, roleNames, uid } from '../utils/format';
@@ -11,11 +11,47 @@ import StatePanel from '../components/StatePanel.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import AppIcon from '../components/AppIcon.vue';
 import AppModal from '../components/AppModal.vue';
+import RecoveryDetails from '../components/RecoveryDetails.vue';
 type Row = Record<string, unknown>;
 const route = useRoute();
 const app = useAppStore();
 const task = useTask();
 const section = computed(() => String(route.params.section || 'reviews'));
+const accountModules: { role: Role; title: string; description: string }[] = [
+  {
+    role: 'PARTICIPANT',
+    title: '参与者账号',
+    description: '参与者自行注册；查看账号状态与脱敏手机号，找回申请另行核验。',
+  },
+  {
+    role: 'ORGANIZER',
+    title: '组织者账号',
+    description: '组织者自行注册；可以与参与者共用手机号，同角色内不得重复。',
+  },
+  {
+    role: 'CHECKER',
+    title: '检票账号与授权',
+    description: '创建独立检票账号，选择活动与场次，再把凭据交给对应组织者安排现场人员。',
+  },
+  {
+    role: 'ADMIN',
+    title: '管理员账号',
+    description: '首个管理员由系统初始化；已有管理员可创建其他管理员，新管理员首次登录必须改密。',
+  },
+];
+const accountRole = computed(
+  () => accountModules.find((x) => x.role === route.query.role)?.role || 'CHECKER',
+);
+const accountModule = computed(() => accountModules.find((x) => x.role === accountRole.value)!);
+const canCreateAccount = computed(
+  () => section.value === 'accounts' && ['ADMIN', 'CHECKER'].includes(accountRole.value),
+);
+const credentials = ref<{
+  username: string;
+  password: string;
+  role: string;
+  assignment: string;
+} | null>(null);
 const config: Record<string, { title: string; description: string; icon: string; path: string }> = {
   reviews: {
     title: '活动审核',
@@ -54,7 +90,7 @@ const config: Record<string, { title: string; description: string; icon: string;
     path: '/admin/investigations',
   },
   restrictions: {
-    title: '业务限制与事实核实',
+    title: '报名与发布限制',
     description: '限制新业务，不影响合法既有订单履约。按手机号身份关联事实。',
     icon: 'LockKeyhole',
     path: '/admin/restriction-candidates',
@@ -66,25 +102,34 @@ const config: Record<string, { title: string; description: string; icon: string;
     path: '/admin/payments',
   },
   audit: {
-    title: '操作日志与单条审计',
+    title: '操作记录与追溯',
     description: '关键动作可追踪；日志不提供人工改删或导出。',
     icon: 'FileText',
     path: '/admin/audit-logs',
   },
   jobs: {
-    title: '持久任务与结算进度',
+    title: '后台处理进度',
     description: '终止立即生效，逐项处理可恢复。超期仍继续，并记录未达标。',
     icon: 'RefreshCw',
     path: '/admin/jobs',
   },
   recoveries: {
-    title: '人工找回与密码重置',
-    description: '先进行线下身份核验并保存依据，再重置指定账号密码。',
+    title: '账号找回申请',
+    description:
+      '审核原手机号、用户名、当前号码及行为陈述；通过后换绑已验证的当前号码、重置临时密码并模拟短信通知。',
     icon: 'HelpCircle',
     path: '/admin/recoveries',
   },
 };
-const current = computed(() => config[section.value] || config.events!);
+const current = computed(() =>
+  section.value === 'accounts'
+    ? {
+        ...config.accounts!,
+        title: accountModule.value.title,
+        description: accountModule.value.description,
+      }
+    : config[section.value] || config.events!,
+);
 const rows = ref<Row[]>([]);
 const loading = ref(true);
 const error = ref('');
@@ -102,6 +147,7 @@ const form = reactive({
   initialPassword: 'Demo2026',
   role: 'CHECKER',
   sessionId: '',
+  eventId: '',
   name: '',
   reason: '',
   evidenceText: '',
@@ -124,7 +170,24 @@ const visible = computed(() =>
 );
 const allSessions = computed(() =>
   eventOptions.value.flatMap((e) =>
-    e.sessions.map((session) => ({ ...session, eventName: e.name })),
+    e.sessions.map((session) => ({ ...session, eventId: e.id, eventName: e.name })),
+  ),
+);
+const configurableEvents = computed(() =>
+  eventOptions.value.filter(
+    (e) =>
+      ['PENDING_REVIEW', 'PUBLISHED'].includes(e.status || '') &&
+      e.sessions.some((s) => Date.parse(s.endsAt) > Date.now()),
+  ),
+);
+const selectableSessions = computed(() =>
+  allSessions.value.filter(
+    (s) =>
+      configurableEvents.value.some((e) => e.id === s.eventId) &&
+      Date.parse(s.endsAt) > Date.now() &&
+      (modal.value === 'binding'
+        ? s.eventId === selected.value?.eventId
+        : s.eventId === form.eventId),
   ),
 );
 const eventName = (eventId: unknown) =>
@@ -145,7 +208,9 @@ async function load() {
         ? { objectId: search.value || undefined }
         : section.value === 'payments'
           ? { orderId: search.value || undefined }
-          : {};
+          : section.value === 'accounts'
+            ? { role: accountRole.value, username: search.value || undefined }
+            : {};
     const result = await get<Page<Row> & { dailyPublishedCount?: number }>(
       `${endpoint.value}${query({ page: pageNumber.value, pageSize: 20, ...extra })}`,
     );
@@ -169,17 +234,48 @@ function open(kind: string, row?: Row) {
   form.factKey = uid();
   form.verificationNote = '';
   form.sessionId = row && row.assignedSessionId ? String(row.assignedSessionId) : '';
+  form.eventId = row?.eventId ? String(row.eventId) : '';
+  if (kind === 'account') {
+    form.role = accountRole.value;
+    form.username = '';
+    form.initialPassword = '';
+  }
+  if (['accountReset', 'reset', 'recovery'].includes(kind)) form.initialPassword = '';
+  if (kind === 'recovery') form.decision = 'VERIFIED';
+}
+function showCredentials(username: string, role: string) {
+  const session = allSessions.value.find((s) => s.id === form.sessionId);
+  credentials.value = {
+    username,
+    role,
+    password: form.initialPassword,
+    assignment: session ? `${session.eventName} · ${session.name}` : '',
+  };
+}
+async function copyCredentials() {
+  if (!credentials.value) return;
+  const c = credentials.value;
+  try {
+    await navigator.clipboard.writeText(
+      `活动票务登录凭据\n账号：${c.username}\n初始密码：${c.password}\n${c.assignment ? `授权：${c.assignment}\n` : ''}登录地址：${location.origin}/#/login\n请使用账号密码登录；组织者需退出自己的账号后使用检票账号登录。`,
+    );
+    app.toast('凭据已复制，请自行通过可信渠道交接');
+  } catch {
+    app.toast('无法自动复制，请手动复制下方账号和密码', 'error');
+  }
 }
 async function submit() {
   await task.run(async () => {
-    if (modal.value === 'account')
+    if (modal.value === 'account') {
       await post('/admin/accounts', {
         username: form.username,
         initialPassword: form.initialPassword,
         role: form.role,
         ...(form.role === 'CHECKER' ? { sessionId: form.sessionId } : {}),
       });
-    else if (modal.value === 'binding')
+      showCredentials(form.username.trim(), form.role);
+      form.initialPassword = '';
+    } else if (modal.value === 'binding')
       await patch(`/admin/accounts/${id(selected.value!)}`, {
         expectedVersion: n(selected.value!, 'version'),
         assignedSessionId: form.sessionId,
@@ -227,6 +323,12 @@ async function submit() {
       await post(`/admin/recoveries/${id(selected.value!)}/resolution`, {
         decision: form.decision,
         verificationNote: form.verificationNote,
+        ...(form.decision === 'VERIFIED'
+          ? {
+              initialPassword: form.initialPassword,
+              reason: [...form.verificationNote].slice(0, 200).join(''),
+            }
+          : {}),
       });
     else if (modal.value === 'reset')
       await post(`/admin/accounts/${s(selected.value!, 'targetAccountId')}/password-reset`, {
@@ -278,16 +380,89 @@ onMounted(load);
     ><button class="btn secondary small" @click="load">
       <AppIcon name="RefreshCw" :size="14" />刷新</button
     ><button
-      v-if="section === 'accounts' || section === 'categories'"
+      v-if="canCreateAccount || section === 'categories'"
       class="btn primary small"
       @click="open(section === 'accounts' ? 'account' : 'category')"
     >
       <AppIcon name="Plus" :size="15" />{{
-        section === 'accounts' ? '创建账号' : '新增类别'
+        section === 'accounts' ? `创建${roleNames[accountRole]}账号` : '新增类别'
       }}</button
     ><RouterLink v-if="section === 'reports'" to="/admin/investigations" class="btn secondary small"
       >核查记录<AppIcon name="ArrowUpRight" :size="14" /></RouterLink
   ></PageHeading>
+  <nav v-if="section === 'accounts'" class="account-modules" aria-label="账号分类">
+    <RouterLink
+      v-for="item in accountModules"
+      :key="item.role"
+      :to="{ path: '/admin/accounts', query: { role: item.role } }"
+      :class="{ active: accountRole === item.role }"
+    >
+      <AppIcon
+        :name="
+          item.role === 'CHECKER'
+            ? 'ScanLine'
+            : item.role === 'ADMIN'
+              ? 'ShieldCheck'
+              : 'UsersRound'
+        "
+        :size="18"
+      />{{ item.title }}
+    </RouterLink>
+  </nav>
+  <section
+    v-if="section === 'accounts' && credentials"
+    class="panel credential-receipt"
+    aria-label="新账号凭据"
+  >
+    <h3>账号已创建，请完成凭据交接</h3>
+    <p>
+      {{
+        credentials.role === 'CHECKER'
+          ? '请把以下检票凭据交给对应活动组织者，由组织者安排工作人员。组织者需退出自己的账号，再用检票账号登录。'
+          : '请把凭据交给新管理员，新管理员首次登录必须修改密码。'
+      }}
+    </p>
+    <p v-if="credentials.assignment">授权活动与场次：{{ credentials.assignment }}</p>
+    <div class="credential-values">
+      <span
+        >账号 <strong>{{ credentials.username }}</strong></span
+      ><span
+        >初始密码 <strong>{{ credentials.password }}</strong></span
+      >
+    </div>
+    <p class="field-help">
+      只在本次创建后展示初始密码，关闭或离开页面后不再显示。系统不保存可回查的明文密码，不自动向任何人发送凭据；遗失后由管理员重置。
+    </p>
+    <div class="button-row">
+      <button class="btn secondary small" @click="copyCredentials">复制交接信息</button
+      ><button class="btn secondary small" @click="credentials = null">已交接，关闭</button>
+    </div>
+  </section>
+  <div v-if="section === 'accounts'" class="alert info" style="margin-bottom: 22px">
+    <AppIcon name="Info" />
+    <p>
+      {{
+        accountRole === 'CHECKER'
+          ? '每场至少一名检票员，也可以配置多名；一个检票账号当前只绑定一场，不需要手机号。账号共用会互相挤下线，请为每名同时值守的工作人员创建独立账号。'
+          : accountRole === 'ADMIN'
+            ? '首个管理员由系统初始化，已有管理员仍可创建其他管理员。管理员不绑定手机号或检票场次。'
+            : '这里仅列出当前类型账号。参与者与组织者分别注册和登录，同一个手机号可以拥有这两种身份；账号角色不切换。'
+      }}
+    </p>
+  </div>
+  <div v-if="section === 'recoveries'" class="alert info" style="margin-bottom: 22px">
+    <AppIcon name="HelpCircle" />
+    <p>
+      信息来源：登录页 → 忘记密码 → 填写用户名和登记手机号 →
+      提交申请。工作人员通过当面核对或已有联系渠道确认本人身份，在本页记录核验依据，再设置临时密码并自行告知本人。系统不会自动核实陈述。普通用户优先通过手机号验证码重置密码；人工审核通过后可在本页直接换绑并重置，通知只模拟输出在后端LOCAL_RECOVERY_SMS日志，不真正发送短信。
+    </p>
+  </div>
+  <div v-if="section === 'audit'" class="alert info" style="margin-bottom: 22px">
+    <AppIcon name="FileText" />
+    <p>
+      这是“谁在什么时候对哪个对象做了什么”的操作记录，例如审核活动、重置密码和检票，用于排查误操作与核对责任。管理员只能查询，不在这里修改业务数据。
+    </p>
+  </div>
   <div v-if="section === 'reviews'" class="stat-grid">
     <div class="stat-card">
       <div class="stat-label">待审核活动<AppIcon name="ClipboardCheck" :size="16" /></div>
@@ -331,7 +506,7 @@ onMounted(load);
   <div v-if="section === 'jobs'" class="alert info" style="margin-bottom: 23px">
     <AppIcon name="Clock3" />
     <p>
-      超时释放、递补、自然结算目标1分钟；取消/下架结算和必发通知目标5分钟。前端演示同步处理终止，不能代表真实持久任务已通过验收。
+      这里查看系统自动工作的进度，例如取消超时未支付订单、递补候补、处理活动退款和结算。进度保存在数据库，应用重启后可继续，不需要管理员逐单执行。超时释放、递补、自然结算目标1分钟；取消/下架结算目标5分钟，尚未完成故障恢复性能验收。
     </p>
   </div>
   <section class="panel">
@@ -371,12 +546,17 @@ onMounted(load);
               ? '按完整订单编号查询'
               : section === 'audit'
                 ? '按完整对象编号查询日志'
-                : '在当前页搜索名称、状态或编号'
+                : section === 'accounts'
+                  ? '按当前类型的用户名搜索'
+                  : '在当前页搜索名称、状态或编号'
           "
           aria-label="筛选管理记录"
         />
       </div>
-      <button v-if="['payments', 'audit'].includes(section)" class="btn secondary small">
+      <button
+        v-if="['payments', 'audit', 'accounts'].includes(section)"
+        class="btn secondary small"
+      >
         查询</button
       ><span class="push-right result-total">{{ total }} 条记录</span>
     </form>
@@ -440,8 +620,9 @@ onMounted(load);
           <tr>
             <th>账号</th>
             <th>固定角色</th>
+            <th>登记手机号</th>
             <th>可用状态</th>
-            <th>授权场次</th>
+            <th v-if="accountRole === 'CHECKER'">授权活动与场次</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -453,12 +634,17 @@ onMounted(load);
             </td>
             <td>{{ roleNames[s(row, 'role') as keyof typeof roleNames] }}</td>
             <td>
-              <StatusBadge
-                :status="row.enabled ? 'VALID' : 'INVALID'"
-                :text="row.enabled ? '可用' : '停用'"
-              />
+              {{
+                row.maskedPhone || (['ADMIN', 'CHECKER'].includes(accountRole) ? '无需绑定' : '—')
+              }}
             </td>
             <td>
+              <StatusBadge
+                :status="row.enabled && !row.deletedAt ? 'VALID' : 'INVALID'"
+                :text="row.deletedAt ? '已注销/删除' : row.enabled ? '可用' : '停用'"
+              />
+            </td>
+            <td v-if="accountRole === 'CHECKER'">
               {{ allSessions.find((x) => x.id === row.assignedSessionId)?.name || '—'
               }}<small v-if="row.assignedSessionId" class="secondary-text">{{
                 eventName(row.eventId)
@@ -480,7 +666,9 @@ onMounted(load);
                 ><button class="text-link" @click="open('accountReset', row)">重置密码</button
                 ><button class="text-link" @click="open('deleteAccount', row)">删除</button>
               </div>
-              <span v-else class="muted" style="font-size: 10px">普通账号不可切换角色</span>
+              <span v-else class="muted" style="font-size: 10px">{{
+                row.deletedAt ? '历史账号只读' : '自行注册；密码问题通过账号找回申请处理'
+              }}</span>
             </td>
           </tr>
         </tbody>
@@ -723,7 +911,7 @@ onMounted(load);
         <thead>
           <tr>
             <th>账号</th>
-            <th>登记手机号</th>
+            <th>原手机号 / 当前手机号</th>
             <th>状态</th>
             <th>受理时间</th>
             <th>操作</th>
@@ -732,16 +920,20 @@ onMounted(load);
         <tbody>
           <tr v-for="row in visible" :key="id(row)">
             <td>{{ s(row, 'account') }}</td>
-            <td>{{ s(row, 'phone') }}</td>
+            <td>
+              {{ s(row, 'phone')
+              }}<small class="secondary-text">当前：{{ s(row, 'currentPhone') }}</small>
+            </td>
             <td>{{ s(row, 'status') }}</td>
             <td>{{ dateTime(s(row, 'createdAt')) }}</td>
             <td>
-              <button
+              <button class="text-link" @click="open('recoveryDetails', row)">查看申诉资料</button
+              ><button
                 v-if="row.status === 'PENDING'"
                 class="text-link"
                 @click="open('recovery', row)"
               >
-                记录线下核验</button
+                审核并处理</button
               ><button
                 v-if="row.status === 'VERIFIED'"
                 class="text-link"
@@ -834,20 +1026,18 @@ onMounted(load);
                           ? '按原合法依据重试退款'
                           : '单条记录详情'
     "
-    :wide="modal === 'detail' || modal === 'investigate'"
+    :wide="['detail', 'investigate', 'recovery', 'recoveryDetails'].includes(modal)"
     @close="modal = ''"
   >
     <pre v-if="modal === 'detail'" class="data-inspector">{{
       JSON.stringify(detail, null, 2)
     }}</pre>
+    <RecoveryDetails v-else-if="modal === 'recoveryDetails' && selected" :recovery="selected" />
     <form v-else @submit.prevent="submit">
       <template v-if="modal === 'account'"
         ><div class="form-field">
-          <label for="new-account-role">账号角色</label
-          ><select id="new-account-role" v-model="form.role">
-            <option value="CHECKER">检票员</option>
-            <option value="ADMIN">管理员</option>
-          </select>
+          <label>账号类型</label>
+          <p>{{ roleNames[form.role as Role] }} · 无需手机号</p>
         </div>
         <div class="form-field">
           <label for="new-account-name">用户名</label
@@ -858,10 +1048,24 @@ onMounted(load);
           ><input id="new-account-password" v-model="form.initialPassword" required minlength="8" />
         </div>
         <div v-if="form.role === 'CHECKER'" class="form-field">
+          <label for="new-account-event">分配活动</label
+          ><select
+            id="new-account-event"
+            v-model="form.eventId"
+            required
+            @change="form.sessionId = ''"
+          >
+            <option value="" disabled>选择待审核或未结束的已发布活动</option>
+            <option v-for="event in configurableEvents" :key="event.id" :value="event.id">
+              {{ event.name }}
+            </option>
+          </select>
+        </div>
+        <div v-if="form.role === 'CHECKER'" class="form-field">
           <label for="new-account-session">授权场次</label
           ><select id="new-account-session" v-model="form.sessionId" required>
             <option value="" disabled>选择已存在场次</option>
-            <option v-for="session in allSessions" :key="session.id" :value="session.id">
+            <option v-for="session in selectableSessions" :key="session.id" :value="session.id">
               {{ session.eventName }} · {{ session.name }}
             </option>
           </select>
@@ -908,25 +1112,44 @@ onMounted(load);
         <p class="field-help">
           属实且仍已发布则下架，终态只记录违规；下架不可恢复。同活动同一事实不重复记违规。
         </p></template
-      ><template v-if="modal === 'recovery'"
-        ><div class="form-field">
+      ><template v-if="modal === 'recovery'">
+        <RecoveryDetails v-if="selected" :recovery="selected" />
+        <div class="form-field">
           <label for="recovery-decision">核验结论</label
           ><select id="recovery-decision" v-model="form.decision">
-            <option value="VERIFIED">已完成线下核验</option>
+            <option value="VERIFIED">审核通过，换绑并重置密码</option>
             <option value="REJECTED">核验未通过</option>
           </select>
         </div>
         <div class="form-field">
-          <label for="recovery-note">线下核验记录</label
+          <label for="recovery-note">核验方式、核对依据与结论</label
           ><textarea
             id="recovery-note"
             v-model="form.verificationNote"
             required
+            minlength="10"
             maxlength="2000"
-          /></div></template
-      ><template v-if="modal === 'reset'"
-        ><p class="field-help" style="margin-bottom: 20px">
-          仅使用这条已核验且绑定原账号的申请，不凭手机号直接重置。
+            placeholder="记录核对了哪些资料、为什么能够确认或不能确认申请人为本人。"
+          />
+        </div>
+        <div v-if="form.decision === 'VERIFIED'" class="form-field">
+          <label for="approve-temporary-password">新的临时密码</label
+          ><input
+            id="approve-temporary-password"
+            v-model="form.initialPassword"
+            required
+            minlength="8"
+            maxlength="72"
+            pattern="(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{8,72}"
+            autocomplete="new-password"
+          /><small
+            >通过后换绑申请人已验证的当前手机号，再模拟短信下发账号和临时密码。日志标记LOCAL_RECOVERY_SMS。</small
+          >
+        </div>
+      </template>
+      <template v-if="modal === 'reset'">
+        <p class="field-help">
+          仅使用这条已审核通过的申请；换绑其已验证的当前手机号、重置密码并模拟短信通知，不凭手机号直接改密。
         </p>
         <div class="form-field">
           <label for="reset-password">临时密码</label
@@ -934,16 +1157,14 @@ onMounted(load);
         </div>
         <div class="form-field">
           <label for="reset-reason">操作理由</label
-          ><input id="reset-reason" v-model="form.reason" required /></div></template
-      ><template v-if="modal === 'binding'"
+          ><input id="reset-reason" v-model="form.reason" required />
+        </div>
+      </template>
+      <template v-if="modal === 'binding'"
         ><div class="form-field">
           <label for="assignment">新的授权场次</label
           ><select id="assignment" v-model="form.sessionId" required>
-            <option
-              v-for="session in allSessions.filter((s) => s.eventId === selected?.eventId)"
-              :key="session.id"
-              :value="session.id"
-            >
+            <option v-for="session in selectableSessions" :key="session.id" :value="session.id">
               {{ session.eventName }} · {{ session.name }}
             </option>
           </select>

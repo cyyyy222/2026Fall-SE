@@ -1,6 +1,10 @@
+> 2026-11-03当前实现：可选邮箱、验证码找回和个人资料新号验证码换绑见[最新交付](account-recovery-update.md)。本机MySQL/Redis已连接；下表原“待接库验证”标签保留为早期记录，不代表当前未接库；完整并发/性能验收仍待完成。
+
+> 2026-11-03：新增验证码接口和注册必填验证码，ManagedAccount新增maskedPhone，规则以[账号调整](account-auth-update.md)及api.md为准。以下其他初版验证边界为历史记录。
+
 # Java 请求、响应及接口落点
 
-与 api.md 89项HTTP接口逐一对照。AUTH-01为真实CSRF基础设施，其余88项已接入业务用例及MySQL DAO。数据库会话代码已实现，默认未连接；无存储时503，完整HTTP业务尚未联调。
+与 api.md 93项HTTP接口逐一对照。AUTH-01为真实CSRF基础设施，其余92项已接入业务用例及MySQL DAO。数据库会话已接通本机MySQL；无存储时503，已完成的真实HTTP联调范围见最新交付，完整需求全分支尚未验收。
 
 Requests（写入）、Queries（查询）、Views（响应）使用独立类型；RequestContext包含服务端SessionPrincipal、幂等键、trace和可信TCP远端地址。UUID路径参数强类型；无任意Map业务请求。以下类型位于对应dto包。`-`表示无参数。
 
@@ -11,6 +15,10 @@ Requests（写入）、Queries（查询）、Views（响应）使用独立类型
 | AUTH-03 | `AuthController.register` | `Register` | `-` | `Views.Registered` |
 | AUTH-04 | `AuthController.requestRecovery` | `Recovery` | `-` | `Views.RecoveryReceipt` |
 | AUTH-05 | `AuthController.logout` | `Empty` | `-` | `Views.LoggedOut` |
+| AUTH-06 | `AuthController.phoneCode` | `PhoneCode` | `-` | `Views.PhoneCodeReceipt` |
+| AUTH-07 | `AuthController.phoneLogin` | `PhoneLogin` | `-` | `Views.Identity` |
+| AUTH-08 | `AuthController.phonePasswordReset` | `PhonePasswordReset` | `-` | `Views.ChangedPassword` |
+| ME-27 | `MeAccountController.changePhone` | `ChangePhone` | `-` | `Views.ChangedPhone` |
 | ME-01 | `MeAccountController.currentUser` | `-` | `-` | `Views.Identity` |
 | ME-02 | `MeAccountController.updateProfile` | `Profile` | `-` | `Mutation<Views.UserView>` |
 | ME-03 | `MeAccountController.changePassword` | `Password` | `-` | `Views.ChangedPassword` |

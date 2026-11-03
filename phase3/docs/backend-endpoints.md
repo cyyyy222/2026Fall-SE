@@ -1,10 +1,12 @@
+> 2026-11-03当前实现：可选邮箱、验证码找回和个人资料新号验证码换绑见[最新交付](account-recovery-update.md)。本机MySQL/Redis已连接；下表原“待接库验证”标签保留为早期记录，不代表当前未接库；完整并发/性能验收仍待完成。
+
 # 后端接口三层实施表（供审阅）
 
-版本：v0.3 · 日期：2026-11-02 · 状态：89项业务Java路由已注册；具体业务用例已接入；默认离线，未接库。
+版本：v0.6 · 日期：2026-11-03 · 状态：93项业务路由已注册；本机MySQL/Redis接通，账号与验证码调整见[最新说明](account-recovery-update.md)，全量性能与恢复尚未验收。
 
-本表将[api.md](api.md)的89项业务HTTP接口逐项分配给Controller方法、Service接口和DAO。路径均需加`/api`；请求/响应/权限仍以api.md为准，不在此复制成另一套协议。框架边界见[backend-plan.md](backend-plan.md)。
+本表将[api.md](api.md)的93项业务HTTP接口逐项分配给Controller方法、Service接口和DAO。路径均需加`/api`；请求/响应/权限仍以api.md为准，不在此复制成另一套协议。框架边界见[backend-plan.md](backend-plan.md)。
 
-当前AUTH-01可离线真实使用，其余88项已实现业务初版并接入参数化DAO，依赖未连接时503；不再返回501占位。表中“已实现/待接库验证”不等于真实业务或并发验收通过。见[业务交付](backend-implementation.md)。
+当前AUTH-01为CSRF基础设施，其余92项已实现业务初版并接入参数化DAO；本机依赖已连接，依赖不可用时503。表中“已实现/待接库验证”不等于真实业务或并发验收通过。见[业务交付](backend-implementation.md)。
 
 Controller方法名对应已创建代码，可在不改变HTTP契约的前提下按Java规范调整。表中的Service是Controller的门面；例如EventService的终止/海报方法会委托EventTerminationService/PosterService，FinanceAuditService重试委托RefundService，不在Controller跨层执行。所有写用例另依赖共用审计、消息、幂等及事务策略，本表DAO列是主业务数据，不是完整依赖列表。
 
@@ -15,6 +17,10 @@ Controller方法名对应已创建代码，可在不改变HTTP契约的前提下
 | AUTH-03 | POST `/auth/register` | `AuthController.register` | `AuthService` | UserDao / LoginSessionDao / RecoveryDao | 已实现/待接库验证 |
 | AUTH-04 | POST `/auth/recoveries` | `AuthController.requestRecovery` | `AuthService` | UserDao / LoginSessionDao / RecoveryDao | 已实现/待接库验证 |
 | AUTH-05 | POST `/auth/logout` | `AuthController.logout` | `AuthService` | UserDao / LoginSessionDao / RecoveryDao | 已实现/待接库验证 |
+| AUTH-06 | POST `/auth/phone-codes` | `AuthController.phoneCode` | `AuthService` → `PhoneCodeUseCases` | RedisTransientDao / RedisKeyFactory / RateLimitService | 本地控制台交付，真实联调通过 |
+| AUTH-07 | POST `/auth/phone-login` | `AuthController.phoneLogin` | `AuthService` → `PhoneCodeUseCases` / `IdentityUseCases` | Redis挑战 / JdbcRecordStore用户与会话 | 真实联调通过 |
+| AUTH-08 | POST `/auth/password-reset` | `AuthController.phonePasswordReset` | `AuthService` → `PhoneCodeUseCases` / `IdentityUseCases` | Redis挑战 / 用户与会话DAO | 真实HTTP通过 |
+| ME-27 | PATCH `/me/phone` | `MeAccountController.changePhone` | `AccountService` → `IdentityUseCases` | 新号验证 / 用户、会话与幂等DAO | 真实HTTP通过，仅新号验证 |
 | ME-01 | GET `/me` | `MeAccountController.currentUser` | `AccountService` | UserDao / LoginSessionDao / PhoneIdentityDao | 已实现/待接库验证 |
 | ME-02 | PATCH `/me/profile` | `MeAccountController.updateProfile` | `AccountService` | UserDao / LoginSessionDao / PhoneIdentityDao | 已实现/待接库验证 |
 | ME-03 | POST `/me/password` | `MeAccountController.changePassword` | `AccountService` | UserDao / LoginSessionDao / PhoneIdentityDao | 已实现/待接库验证 |

@@ -6,6 +6,11 @@ import { uid } from '../utils/format';
 
 const STORAGE_KEY = 'campus-tickets-demo-v1';
 const SESSION_KEY = 'campus-ticket-session';
+const phoneChallenges = new Map<
+  string,
+  { id: string; code: string; expires: number; attempts: number }
+>();
+const phoneCooldowns = new Map<string, number>();
 interface Recovery {
   id: string;
   account: string;
@@ -15,6 +20,12 @@ interface Recovery {
   createdAt: string;
   verificationNote: string | null;
   resolvedAt: string | null;
+  currentPhone?: string;
+  role?: string;
+  statement?: string;
+  pastBehavior?: string;
+  contactVerifiedAt?: string;
+  historicalHints?: string[];
 }
 interface ExportRecord {
   id: string;
@@ -85,6 +96,8 @@ let db = load();
 const save = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
 save();
 export function resetDemo() {
+  phoneChallenges.clear();
+  phoneCooldowns.clear();
   db = {
     ...makeSeed(),
     recoveries: [],
@@ -133,6 +146,7 @@ function userView(user: DemoAccount) {
     deletedAt: _deleted,
     version: _version,
     assignedSessionId: _assignment,
+    phone: _phone,
     ...view
   } = user;
   return view;
@@ -560,11 +574,80 @@ export async function mockRequest<T>(
 
   function handle(): unknown {
     if (p === '/auth/csrf') return { token: 'local-preview', headerName: 'X-CSRF-TOKEN' };
-    if (p === '/auth/login') {
+    const codeScope = (purpose: string) => `${text('phone')}:${text('role')}:${purpose}`;
+    function verifyCode(
+      purpose: string,
+      consume: boolean,
+      phone = text('phone'),
+      role = text('role'),
+    ) {
+      const key = `${phone}:${role}:${purpose}`,
+        c = phoneChallenges.get(key);
+      if (!c || c.id !== text('verificationId') || c.expires <= Date.now())
+        fail('PHONE_CODE_EXPIRED', '验证码已过期、已使用或与手机号及角色不匹配', 422);
+      if (c.code !== text('verificationCode')) {
+        if (--c.attempts <= 0) phoneChallenges.delete(key);
+        fail('PHONE_CODE_INVALID', '验证码错误', 422);
+      }
+      if (consume) phoneChallenges.delete(key);
+    }
+    if (p === '/auth/phone-codes') {
+      if (
+        !/^1\d{10}$/.test(text('phone')) ||
+        !['PARTICIPANT', 'ORGANIZER'].includes(text('role')) ||
+        !['LOGIN', 'REGISTER', 'RESET_PASSWORD', 'RECOVERY_CONTACT', 'CHANGE_PHONE'].includes(
+          text('purpose'),
+        )
+      )
+        fail('VALIDATION_FAILED', '手机号、角色或用途无效', 422);
+      if (text('purpose') === 'CHANGE_PHONE') {
+        const current = requireRole('PARTICIPANT', 'ORGANIZER');
+        if (current.role !== text('role')) fail('FORBIDDEN', '角色与当前账号不符', 403);
+        if (current.phone === text('phone')) fail('PHONE_UNCHANGED', '新手机号与当前相同');
+        if (
+          db.accounts.some(
+            (a) => !a.deletedAt && a.role === current.role && a.phone === text('phone'),
+          )
+        )
+          fail('PHONE_ALREADY_BOUND', '该手机号已被同角色的其他账号绑定');
+      }
+      const cooldown = `${text('phone')}:${text('role')}`;
+      if ((phoneCooldowns.get(cooldown) || 0) > Date.now())
+        fail('TOO_MANY_REQUESTS', '请60秒后重试', 429);
+      const code = String(crypto.getRandomValues(new Uint32Array(1))[0]! % 1000000).padStart(
+        6,
+        '0',
+      );
+      const id = uid(),
+        expires = Date.now() + 300000;
+      phoneChallenges.set(codeScope(text('purpose')), { id, code, expires, attempts: 5 });
+      phoneCooldowns.set(cooldown, Date.now() + 60000);
+      console.info(
+        `[LOCAL_PHONE_CODE] mock phone=${text('phone')} role=${text('role')} purpose=${text('purpose')} code=${code}`,
+      );
+      return {
+        verificationId: id,
+        expiresAt: new Date(expires).toISOString(),
+        resendAfterSeconds: 60,
+        delivery: 'MOCK_CONSOLE',
+      };
+    }
+    if (p === '/auth/login' || p === '/auth/phone-login') {
+      if (p === '/auth/phone-login') {
+        if (
+          !['PARTICIPANT', 'ORGANIZER'].includes(text('role')) ||
+          !['LOGIN', 'REGISTER'].includes(text('purpose'))
+        )
+          fail('VALIDATION_FAILED', '手机号登录角色或用途无效', 422);
+        verifyCode(text('purpose'), true);
+      }
       const user = db.accounts.find(
         (a) =>
-          a.username.toLowerCase() === text('username').trim().toLowerCase() &&
-          a.password === text('password'),
+          !a.deletedAt &&
+          (p === '/auth/phone-login'
+            ? a.phone === text('phone') && a.role === text('role')
+            : a.username.toLowerCase() === text('username').trim().toLowerCase() &&
+              a.password === text('password')),
       );
       if (!user) fail('INVALID_CREDENTIALS', '用户名或密码不正确', 401);
       if (!user.enabled || user.deletedAt) fail('ACCOUNT_UNAVAILABLE', '账号不可用', 403);
@@ -588,10 +671,17 @@ export async function mockRequest<T>(
         fail('VALIDATION_FAILED', '密码须为8～72位字母和数字组合', 422);
       if (
         !/^1\d{10}$/.test(text('phone')) ||
-        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text('email')) ||
+        (!!text('email').trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text('email').trim())) ||
         !text('username').trim()
       )
         fail('VALIDATION_FAILED', '请填写有效的用户名、邮箱和手机号', 422);
+      verifyCode('REGISTER', false);
+      if (
+        db.accounts.some(
+          (a) => !a.deletedAt && a.role === text('role') && a.phone === text('phone'),
+        )
+      )
+        fail('PHONE_ACCOUNT_EXISTS', '该手机号已有当前角色的账号，这是你的账号吗？', 409);
       if (
         db.accounts.some(
           (a) =>
@@ -601,14 +691,16 @@ export async function mockRequest<T>(
         )
       )
         fail('VALIDATION_FAILED', '用户名或邮箱已被使用', 422);
+      verifyCode('REGISTER', true);
       const user: DemoAccount = {
         id: uid(),
         username: text('username').trim(),
         password: text('password'),
         role: text('role') as Role,
         displayName: null,
-        email: text('email'),
+        email: text('email').trim() || null,
         maskedPhone: `${text('phone').slice(0, 3)}****${text('phone').slice(-4)}`,
+        phone: text('phone'),
         mustChangePassword: false,
         sessionExpiresAt: plus(7 * 86400000),
         restrictions: [],
@@ -622,8 +714,43 @@ export async function mockRequest<T>(
       message(user.id, '欢迎加入', '欢迎发现属于你的现场。');
       return { id: user.id, username: user.username, role: user.role };
     }
+    if (p === '/auth/password-reset') {
+      if (!/^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,72}$/.test(text('newPassword')))
+        fail('VALIDATION_FAILED', '新密码须为8～72位字母数字组合', 422);
+      verifyCode('RESET_PASSWORD', true);
+      const target = db.accounts.find(
+        (a) => !a.deletedAt && a.phone === text('phone') && a.role === text('role'),
+      );
+      if (!target) fail('PHONE_NOT_REGISTERED', '该手机号尚未绑定当前角色的账号', 404);
+      if (!target.enabled) fail('ACCOUNT_UNAVAILABLE', '账号不可用', 403);
+      target.password = text('newPassword');
+      target.mustChangePassword = false;
+      delete db.accountSessions[target.id];
+      sessionStorage.removeItem(SESSION_KEY);
+      return { changed: true, requiresLogin: true };
+    }
     if (p === '/auth/recoveries') {
-      const target = db.accounts.find((a) => a.username === text('account'));
+      if (
+        !text('account').trim() ||
+        !/^1\d{10}$/.test(text('phone')) ||
+        !/^1\d{10}$/.test(text('currentPhone')) ||
+        !['PARTICIPANT', 'ORGANIZER'].includes(text('role')) ||
+        [...text('statement').trim()].length < 20 ||
+        [...text('pastBehavior').trim()].length < 20
+      )
+        fail(
+          'VALIDATION_FAILED',
+          '请填写原手机号、用户名、当前手机号及至少20字的陈述和以往行为',
+          422,
+        );
+      verifyCode('RECOVERY_CONTACT', true, text('currentPhone'));
+      const target = db.accounts.find(
+        (a) =>
+          !a.deletedAt &&
+          a.username.toLowerCase() === text('account').trim().toLowerCase() &&
+          a.phone === text('phone') &&
+          a.role === text('role'),
+      );
       const request: Recovery = {
         id: uid(),
         account: text('account'),
@@ -633,12 +760,23 @@ export async function mockRequest<T>(
         createdAt: now(),
         verificationNote: null,
         resolvedAt: null,
+        currentPhone: text('currentPhone'),
+        role: text('role'),
+        statement: text('statement'),
+        pastBehavior: text('pastBehavior'),
+        contactVerifiedAt: now(),
+        historicalHints: target
+          ? db.orders
+              .filter((o) => o.userId === target.id)
+              .slice(0, 5)
+              .map((o) => `本人订单：${o.event.eventName} / ${o.status}`)
+          : [],
       };
       db.recoveries.push(request);
       return {
         requestId: request.id,
         status: 'RECEIVED',
-        message: '申请已登记，请等待管理员线下核验',
+        message: '详细申诉已提交，等待管理员审核',
       };
     }
     if (p.startsWith('/public/')) {
@@ -712,6 +850,27 @@ export async function mockRequest<T>(
       user.displayName =
         text('displayName').trim() || fail('VALIDATION_FAILED', '请输入本人姓名', 422);
       return mutate(userView(user));
+    }
+    if (p === '/me/phone') {
+      requireRole('PARTICIPANT', 'ORGANIZER');
+      if (user.phone === text('newPhone')) fail('PHONE_UNCHANGED', '新手机号与当前相同');
+      if (
+        db.accounts.some(
+          (a) =>
+            !a.deletedAt &&
+            a.id !== user.id &&
+            a.role === user.role &&
+            a.phone === text('newPhone'),
+        )
+      )
+        fail('PHONE_ALREADY_BOUND', '该手机号已被同角色其他账号绑定');
+      verifyCode('CHANGE_PHONE', true, text('newPhone'), user.role);
+      user.phone = text('newPhone');
+      user.maskedPhone = user.phone.slice(0, 3) + '****' + user.phone.slice(-4);
+      user.version++;
+      delete db.accountSessions[user.id];
+      sessionStorage.removeItem(SESSION_KEY);
+      return { maskedPhone: user.maskedPhone, requiresLogin: true };
     }
     if (p === '/me/password') {
       if (text('oldPassword') !== user.password) fail('VALIDATION_FAILED', '原密码不正确', 422);
@@ -1524,19 +1683,27 @@ export async function mockRequest<T>(
       if (parts[2] === 'accounts') {
         if (method === 'GET')
           return page(
-            db.accounts.map((a) => ({
-              id: a.id,
-              username: a.username,
-              role: a.role,
-              enabled: a.enabled,
-              deletedAt: a.deletedAt,
-              mustChangePassword: a.mustChangePassword,
-              assignedSessionId: a.assignedSessionId,
-              eventId: a.assignedSessionId
-                ? db.events.find((e) => e.sessions.some((s) => s.id === a.assignedSessionId))?.id
-                : null,
-              version: a.version,
-            })),
+            db.accounts
+              .filter(
+                (a) =>
+                  (!q.get('role') || a.role === q.get('role')) &&
+                  (!q.get('username') ||
+                    a.username.toLowerCase().includes(q.get('username')!.toLowerCase())),
+              )
+              .map((a) => ({
+                id: a.id,
+                username: a.username,
+                role: a.role,
+                maskedPhone: a.maskedPhone,
+                enabled: a.enabled,
+                deletedAt: a.deletedAt,
+                mustChangePassword: a.mustChangePassword,
+                assignedSessionId: a.assignedSessionId,
+                eventId: a.assignedSessionId
+                  ? db.events.find((e) => e.sessions.some((s) => s.id === a.assignedSessionId))?.id
+                  : null,
+                version: a.version,
+              })),
             q,
           );
         if (method === 'POST' && !id) {
@@ -1715,6 +1882,42 @@ export async function mockRequest<T>(
           fail('RESOURCE_NOT_FOUND', '找回申请不存在', 404);
         if (!r.targetAccountId && text('decision') === 'VERIFIED')
           fail('VALIDATION_FAILED', '未匹配到账号，不能通过核验', 422);
+        if (r.status !== 'PENDING') fail('STATE_CONFLICT', '申请已处理');
+        if (text('decision') === 'VERIFIED' && text('initialPassword')) {
+          const target = db.accounts.find((a) => a.id === r.targetAccountId);
+          if (
+            !target ||
+            target.deletedAt ||
+            target.phone !== r.phone ||
+            !r.currentPhone ||
+            !r.contactVerifiedAt
+          )
+            fail('STATE_CONFLICT', '原账号或当前手机号证明失效');
+          if (
+            db.accounts.some(
+              (a) =>
+                !a.deletedAt &&
+                a.id !== target.id &&
+                a.role === target.role &&
+                a.phone === r.currentPhone,
+            )
+          )
+            fail('PHONE_ALREADY_BOUND', '当前手机号已被同角色账号绑定');
+          if (!/^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,72}$/.test(text('initialPassword')))
+            fail('VALIDATION_FAILED', '临时密码须为8～72位字母数字组合', 422);
+          target.phone = r.currentPhone;
+          target.maskedPhone = r.currentPhone.slice(0, 3) + '****' + r.currentPhone.slice(-4);
+          target.password = text('initialPassword');
+          target.mustChangePassword = true;
+          delete db.accountSessions[target.id];
+          r.status = 'RESOLVED';
+          r.resolvedAt = now();
+          r.verificationNote = text('verificationNote');
+          console.info(
+            `[LOCAL_RECOVERY_SMS] mock phone=${r.currentPhone} account=${target.username} initialPassword=${target.password} mustChangePassword=true`,
+          );
+          return r;
+        }
         r.status = text('decision');
         r.verificationNote = text('verificationNote');
         return r;

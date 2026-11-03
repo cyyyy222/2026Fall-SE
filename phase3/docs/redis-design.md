@@ -2,13 +2,13 @@
 
 # Redis 用途、分类与键约定
 
-版本：v0.2 · 2026-11-02 · 当前已实现Redis窗口计数适配器、HMAC指纹、登录三维限流和429/Retry-After策略；认证用例已接限流调用。**未连接Redis、未写入key、未验证真实Lua/TTL**；默认依赖未连接，见[业务交付](backend-implementation.md)。
+版本：v0.3 · 2026-11-03 · 本机Redis已接通，窗口计数、HMAC指纹、登录限流和五种用途验证码已实现。真实Lua/TTL及验证码HTTP联调范围见[最新交付](account-recovery-update.md)；完整并发/故障验收待完成。
 
 ## 1. 分类
 
 | 分类 | 内容 | 本轮状态 | 丢失/故障处理 |
 | --- | --- | --- | --- |
-| 必需技术保护 | 登录、注册、人工找回入口频率 | 已接认证Service，默认无连接 | 接入后 Redis 故障时受保护入口503；已登录业务不依赖这组计数 |
+| 必需技术保护 | 登录、注册、人工找回入口频率 | 已接认证Service，本机已连接 | 接入后 Redis 故障时受保护入口503；已登录业务不依赖这组计数 |
 | 可选性能缓存 | 按内容SHA256定位的不可变海报元数据 | 延后，未实现、默认关闭 | miss查MySQL；故障绕过缓存；权限先查MySQL |
 | 可选运维观测 | 非权威任务耗时/错误指标 | 延后，未实现 | 可丢失，不能替代 jobs/job_items/audit_logs |
 | 禁止作为唯一事实 | 会话撤销、账号权限、库存、订单、幂等、退款资格、消息、处罚、每日发布/举报业务额度、结算进度与正式统计 | 全部归MySQL | Redis重启、淘汰或清空不能改变资格或制造第二次成功 |
@@ -52,3 +52,22 @@ return n
 ## 4. 后续连接验收
 
 在独立test命名空间验证Lua并发计数、首次TTL、到期重置、无TTL修复、跨环境隔离及故障503；验证正常窗口不会被后续请求延期。再验证客户端维度可信来源、HMAC无原文、阈值与Retry-After。**本轮已做key/HMAC、限流维度及故障分支单元测试，未执行这些真实Redis验收。**
+
+
+## 5. 本地手机验证码（2026-11-03新增）
+
+用户已授权本地控制台交付验证码；只在local环境启用，无真实短信发送。手机号登录与注册规则见[账号与登录调整](account-auth-update.md)。
+
+| Key | 值/操作 | TTL |
+| --- | --- | --- |
+| `ticketing:<env>:otp:login:<phoneRoleHmac>` | Hash：id=随机挑战UUID、hash=HMAC(challengeId+code)、attempts=剩余错误次数，初始5 | 300秒，校验不续期 |
+| `ticketing:<env>:otp:register:<phoneRoleHmac>` | 同上；与登录挑战用途隔离 | 300秒 |
+| `ticketing:<env>:otp:reset_password:<phoneRoleHmac>` | Hash同上，仅本人验证码密码重置 | 300秒 |
+| `ticketing:<env>:otp:recovery_contact:<phoneRoleHmac>` | Hash同上，仅人工申诉当前联系号验证 | 300秒 |
+| `ticketing:<env>:otp:change_phone:<phoneRoleHmac>` | Hash同上，仅登录用户绑定新号验证，不验证旧号 | 300秒 |
+| `ticketing:<env>:otp:login:<phoneRoleHmac>:cooldown` | 字符串1，五种用途共享同手机号同角色的发送冷却 | 60秒，不刷新已有冷却 |
+| `ticketing:<env>:rate:phone-code:client:<clientHmac>` | 固定窗口客户端发送次数，20次/600秒 | 600秒，沿用原子计数 |
+
+phoneRoleHmac使用持久HMAC密钥对规范化手机号与角色计算，不在key或值中保存原手机号。验证码摘要另外绑定随机挑战ID。发送Lua同脚本检查冷却、设置挑战和TTL；验证Lua核对挑战ID/摘要，错误扣次且第五次后删除，成功消费原子删除，旧ID或其他角色/用途不能验证当前挑战。注册发现已存在账号时只校验不消费，用户明确确认后允许将REGISTER挑战用于登录该角色原账号并消费。
+
+六位明文只在local的专用LOCAL_PHONE_CODE日志交付，不写SQL、审计或API响应。非local无交付适配器时503 PHONE_CODE_UNAVAILABLE。Redis错误不允许降级放行。本轮真实HTTP联调已验证冷却、用途角色隔离、一次消费及五次错误失效；全部并发/故障边界仍需后续验收。

@@ -867,6 +867,48 @@ input[type='radio'] {
   margin-bottom: 22px;
   overflow: auto;
 }
+.verification-input {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+.verification-input input {
+  min-width: 0;
+  flex: 1;
+}
+.verification-input button {
+  flex-shrink: 0;
+}
+.account-modules {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 22px;
+}
+.account-modules a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 19px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--muted);
+}
+.account-modules a.active {
+  background: var(--rose-soft);
+  color: var(--rose);
+  border-color: var(--rose);
+}
+.credential-receipt {
+  margin-bottom: 22px;
+  border-color: var(--sage);
+}
+.credential-values {
+  display: flex;
+  gap: 32px;
+  padding: 15px 0;
+}
 .tabs button {
   border: 0;
   border-bottom: 2px solid transparent;

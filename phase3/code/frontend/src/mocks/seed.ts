@@ -14,6 +14,7 @@ import type {
 } from '../types';
 
 export interface DemoAccount extends User {
+  phone?: string | null;
   password: string;
   enabled: boolean;
   deletedAt: string | null;
@@ -65,6 +66,7 @@ export function makeSeed(): Database {
     displayName: ['林同学', '陆老师', '陈同学', '平台管理员'][i]!,
     email: i < 2 ? `demo${i}@example.com` : null,
     maskedPhone: i < 2 ? '138****5678' : null,
+    phone: i < 2 ? '13812345678' : null,
     mustChangePassword: false,
     sessionExpiresAt: at(7),
     restrictions: [],

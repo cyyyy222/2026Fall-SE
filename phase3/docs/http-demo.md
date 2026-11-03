@@ -1,4 +1,10 @@
+> 2026-11-03最新规则与验证：[注册、验证码找回、详细申诉与个人信息换绑](account-recovery-update.md)。邮箱选填；换绑只验证新号，并校验同角色占用；后端58项、前端22项回归通过，真实联调范围见该文。该说明优先于下文旧版相关约束与早期验证记录。
+
 # 本机真实 HTTP 联调与演示数据
+
+> 最新更新（2026-11-03）：手机号可跨P/O角色复用，新增本地验证码注册/登录，管理员账号按类型拆分。说明、验证码查看命令及已执行的索引迁移见[账号与登录调整](account-auth-update.md)。原数据与历史联调记录继续保留。
+
+> 2026-11-03 登录修复：前端遇到明确的403 CSRF_INVALID时重新获取令牌，并用原请求体、原幂等键最多重试一次；并发首次写入共享一次令牌获取，令牌请求禁用缓存。JSON请求与海报上传采用同一处理，网络失败、密码错误及其他权限错误不自动重试。后端修复清除旧Cookie时漏调用build()、生成无效Set-Cookie的问题，清理失效会话并允许公开登录/注册/找回入口重新认证；私有接口仍拒绝失效会话。前端14项、后端46项回归通过，前端构建与后端打包成功。更新后刷新页面即可加载；不需要清空MySQL或浏览器全部数据。
 
 日期：2026-11-02。本机前端已切换 HTTP；Java 使用 `local-connected` 连接 `campus_ticketing_dev` 与本机 Redis。后台任务已按用户明确授权启用。此文是当前运行说明，早期文档中的“前端保持 mock / 业务尚未接库”属于历史阶段。
 
@@ -12,7 +18,7 @@
 # 终端一：后端；从此目录运行，才能加载被 Git 忽略的本机配置
 cd D:\2026Fall-SE\phase3\code\backend
 $env:JAVA_HOME='D:\javajdk17'
-& "$env:JAVA_HOME\bin\java.exe" -jar target/ticketing-backend-0.1.0-SNAPSHOT.jar --spring.profiles.active=local-connected --app.jobs.enabled=true
+& "$env:JAVA_HOME\bin\java.exe" -jar target/ticketing-backend-0.1.0-SNAPSHOT.jar --spring.profiles.active=local-connected --app.jobs.enabled=true --logging.file.name=backend-local.log
 ```
 
 ```powershell

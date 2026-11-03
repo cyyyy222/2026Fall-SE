@@ -1,8 +1,10 @@
 # 前后端接口约定
 
-版本：v0.4（业务初版落地，HTTP路径与字段保持） · 日期：2026-11-02 · Base URL：`/api`。
+版本：v0.6（可选邮箱、验证码找回、详细申诉与手机号换绑） · 日期：2026-11-03 · Base URL：`/api`。
 
-本文是开发契约。当前89项Java业务路由均已接入具体Service用例；本机已连接MySQL/Redis，初始化真实演示数据并将前端切为HTTP，后台任务已获授权启用。真实垂直联调与账号见[HTTP演示说明](http-demo.md)，完整业务与性能验收尚未完成。默认无profile仍离线，依赖存储的请求返回503，不返回原501占位。业务来源见 [项目总纲](project.md) 与 [53条需求追踪](requirements-traceability.md)。接口编号稳定，前端页面、后端模块和验收通过编号引用；JOB-* 是内部操作，不是 HTTP 接口。后端为Java三层+MySQL+Redis；Java落点及默认离线边界见[后端方案](backend-plan.md)和[接口实施表](backend-endpoints.md)；初版实现见[业务交付](backend-implementation.md)。
+本文是开发契约。当前93项Java业务路由均已接入具体Service用例；本机已连接MySQL/Redis，初始化真实演示数据并将前端切为HTTP，后台任务已获授权启用。真实垂直联调与账号见[HTTP演示说明](http-demo.md)，完整业务与性能验收尚未完成。默认无profile仍离线，依赖存储的请求返回503，不返回原501占位。业务来源见 [项目总纲](project.md) 与 [53条需求追踪](requirements-traceability.md)。接口编号稳定，前端页面、后端模块和验收通过编号引用；JOB-* 是内部操作，不是 HTTP 接口。后端为Java三层+MySQL+Redis；Java落点及默认离线边界见[后端方案](backend-plan.md)和[接口实施表](backend-endpoints.md)；初版实现见[业务交付](backend-implementation.md)。
+
+> 2026-11-03最新可选邮箱、验证码找回、人工申诉和手机号换绑见[账号恢复调整](account-recovery-update.md)；此前验证码/账号分类流程见[账号与登录调整](account-auth-update.md)，替代phase1旧版“手机号全局唯一/不接验证码”的口径。
 
 ## 1. 通用协议
 
@@ -58,7 +60,7 @@ Page<T>：`{items:T[],page:int,pageSize:int,total:int}`。空查询200且items�
 
 | 项 | 约定 |
 | --- | --- |
-| 登录 | 用户名+密码，不接收客户端角色选择；角色由账号决定 |
+| 登录 | 账密登录由用户名确定角色；手机验证码登录仅P/O且必须选择角色，服务端按手机号+角色查找已存在账号，不能提权 |
 | 会话 | Cookie `TICKET_SESSION`，不透明随机值、HttpOnly、SameSite=Lax、Path=/api；HTTPS时Secure，本机HTTP开发例外 |
 | 存储与期限 | 只存token哈希；成功登录起固定7天；每个账号仅一个有效会话，第二端登录撤销旧会话 |
 | 变更请求 | POST/PUT/PATCH/DELETE均带 `X-CSRF-TOKEN`；AUTH-01先取CSRF，登录后与退出后重取；Cookie随同源请求发送 |
@@ -69,6 +71,8 @@ Page<T>：`{items:T[],page:int,pageSize:int,total:int}`。空查询200且items�
 开发时Vite代理 `/api` 到Java，交付同源；不依赖跨域通配符。防CSRF和随机会话实现需参考 [Spring Security 官方说明](https://docs.spring.io/spring-security/reference/servlet/exploits/csrf.html)。Cookie名称和安全策略为本项目设计决定。
 
 当前Java从MySQL恢复Cookie会话，不使用HttpSession保存认证上下文。普通连续请求保持当前CSRF有效；登录/退出后重取。已验证同一会话连续提交及支付/退款幂等重放；没有通过关闭CSRF解决连续提交问题。
+
+前端仅对明确的403 CSRF_INVALID重新取令牌后最多重试一次，保留原请求体、requestId/attemptId和Idempotency-Key；不自动重试网络失败、401或其他403。并发获取令牌合并处理，获取请求禁止缓存。过期/撤销/不可用账号的旧会话Cookie会被清理；公开登录、注册、找回可继续各自的校验，私有请求仍按原错误拒绝。数据库故障不会降级为匿名认证。
 
 ### 1.4 HTTP与错误码
 
@@ -115,7 +119,7 @@ Page<T>：`{items:T[],page:int,pageSize:int,total:int}`。空查询200且items�
 | 其他写 | 当前账号+稳定接口编号+目标资源ID+Idempotency-Key | 同键异参409；返回该接口规定的原结果与最新可读对象；operationId是服务端生成的操作记录ID，不是接口编号 |
 | 消息/内部任务 | eventKey+recipient；taskId+itemId | 同事务唯一约束，重启或任务重放不重复副作用 |
 
-除AUTH-02～05及ME-06/13、CHK-02/03外，其余POST/PUT/PATCH/DELETE要求 `Idempotency-Key: UUID`；ME-06/13用body键，CHK-03用票唯一性，CHK-02只核对不改变业务。AUTH-02～04不提供通用响应重放缓存：登录依会话撤销规则，注册依有效账号唯一约束，找回依待处理请求合并；AUTH-05依会话撤销规则。匿名注册不同时规定“幂等键必填”和“可选”。会话令牌不得存入可重放响应。强制改密等撤销会话操作仍先鉴权，原会话已撤销则401，前端通过重新登录验证结果。
+除AUTH-02～08及ME-06/13、CHK-02/03外，其余POST/PUT/PATCH/DELETE要求 `Idempotency-Key: UUID`；ME-06/13用body键，CHK-03用票唯一性，CHK-02只核对不改变业务。AUTH-02～04不提供通用响应重放缓存：登录依会话撤销规则，注册依有效账号唯一约束，找回依待处理请求合并；AUTH-05依会话撤销规则；AUTH-06～08使用验证码挑战、冷却和一次消费，不缓存含会话的响应。匿名注册不同时规定“幂等键必填”和“可选”。会话令牌不得存入可重放响应。强制改密等撤销会话操作仍先鉴权，原会话已撤销则401，前端通过重新登录验证结果。
 
 新增设计：通用写幂等记录最少保留180天；报名映射、支付/退款尝试、签到唯一事实随底层业务持续保留。过期通用幂等记录重放仍受当前状态/唯一/版本限制。新业务意图必须生成新键；通用幂等不是替代所有业务唯一性的机制。
 
@@ -174,14 +178,14 @@ Page<T>：`{items:T[],page:int,pageSize:int,total:int}`。空查询200且items�
 | UserView | `id:uuid,username:string,role:Role,email:string?,maskedPhone:string?,displayName:string?,mustChangePassword:false,sessionExpiresAt:time,restrictions:RestrictionView[],checkerSessionId:uuid?`；管理员/检票员邮箱手机号可空；强改密另用ForcePasswordUser |
 | ForcePasswordUser | `id:uuid,username:string,role:Role,mustChangePassword:true,sessionExpiresAt:time`；AUTH-02/ME-01响应为UserView或本模型，按mustChangePassword区分 |
 | RestrictionView | `id:uuid,kind:RestrictionKind,startsAt:time,endsAt:time,reason:string` |
-| RegisterInput | `username:string,password:string,email:string,phone:string,role:PARTICIPANT或ORGANIZER` |
-| RecoveryInput | `account:string,phone:string`；只记录人工请求，不据此直接重置 |
+| RegisterInput | `username:string,password:string,email?:string?,phone:string,role:PARTICIPANT或ORGANIZER,verificationId:uuid,verificationCode:string`；六位数字验证码须匹配REGISTER用途、手机号及角色 |
+| RecoveryInput | `account:string,phone:string,role:PARTICIPANT或ORGANIZER,currentPhone:string,statement:string,pastBehavior:string,verificationId:uuid,verificationCode:string`；phone为原号码；陈述/行为各20～2000字；验证当前号码RECOVERY_CONTACT用途；提交不直接重置 |
 | RecoveryReceipt | `requestId:uuid,status:"RECEIVED",message:string`；不透露账号是否存在 |
-| RecoveryView（ADMIN） | `id:uuid,account:string,phone:string,targetAccountId:uuid?,status:PENDING或VERIFIED或RESOLVED或REJECTED,createdAt:time,verificationNote:string?,resolvedAt:time?`；受理时固定匹配目标账号ID，不随同名重注册改绑；无匹配为null，仅管理员可读 |
+| RecoveryView（ADMIN） | `id:uuid,account:string,phone:string,targetAccountId:uuid?,status:PENDING或VERIFIED或RESOLVED或REJECTED,createdAt:time,verificationNote:string?,resolvedAt:time?,currentPhone:string?,role:string?,statement:string?,pastBehavior:string?,contactVerifiedAt:time?,historicalHints:string[]`；受理时固定匹配目标账号ID，不随同名重注册改绑；无匹配为null，仅管理员可读 |
 | ClosureEligibility | `eligible:boolean,blockers:[{code,message,objectType,objectId}],cancellationCount:int,lastCancelledAt:time?,nextEligibleAt:time?,willBlacklist:boolean` |
-| ManagedAccount | `id:uuid,username:string,role:Role,enabled:boolean,deletedAt:time?,mustChangePassword:boolean,assignedSessionId:uuid?,eventId:uuid?,version:int`；不返回密码 |
+| ManagedAccount | `id:uuid,username:string,role:Role,maskedPhone:string?,enabled:boolean,deletedAt:time?,mustChangePassword:boolean,assignedSessionId:uuid?,eventId:uuid?,version:int`；不返回密码 |
 
-格式约定：用户名1～60字，邮箱≤254字符，手机号11位大陆数字；密码8～72位ASCII字母数字且两类均有；邮箱/用户名去首尾空白，ASCII英文字母不区分大小写唯一；有效账号手机号全局唯一。额外上限为实现设计选择。本人姓名1～60字，允许不同账号重名；非实名认证。
+格式约定：用户名1～60字，邮箱选填，空白按null保存；填写时≤254字符并校验通用邮箱格式（含qq.com、163.com、edu.cn等，无后缀白名单），手机号11位大陆数字；密码8～72位ASCII字母数字且两类均有；填写的邮箱/用户名去首尾空白，ASCII英文字母不区分大小写唯一；有效账号手机号在同角色内唯一，参与者与组织者可共用同一手机号；用户名与邮箱仍全局唯一。额外上限为实现设计选择。本人姓名1～60字，允许不同账号重名；非实名认证。
 
 ### 3.2 活动、草稿与公开查询
 
@@ -283,14 +287,18 @@ total返回真实命中数，不截成10000；超过可查询范围时前端提�
 | --- | --- | --- | --- | --- |
 | AUTH-01 | GET `/auth/csrf` | G/U | 无 → Csrf | 取匿名/登录上下文token；不续业务会话期限 |
 | AUTH-02 | POST `/auth/login` | G | `{username,password}` → UserView或ForcePasswordUser | 200设置Cookie；旧会话撤销；固定7天；失败不设置登录态 |
-| AUTH-03 | POST `/auth/register` | G | RegisterInput → `{id,username,role}` | 201；不自动登录；自注册仅P/O，手机号继承限制/黑名单 |
-| AUTH-04 | POST `/auth/recoveries` | G | RecoveryInput → RecoveryReceipt | 202；统一受理文案，后台人工核验；同一未处理账号/手机号请求可合并防重复 |
+| AUTH-03 | POST `/auth/register` | G | RegisterInput → `{id,username,role}` | 201；必须验证手机，不自动登录；仅P/O，同角色手机号重复且验证码有效时409 PHONE_ACCOUNT_EXISTS，保留该验证码供本人确认登录；继承手机号历史 |
+| AUTH-04 | POST `/auth/recoveries` | G | RecoveryInput → RecoveryReceipt | 202；当前号码先验证；冻结原账号匹配，保存详细陈述供人工审核；不自动改密；同资料合并，不同资料需联系核对 |
 | AUTH-05 | POST `/auth/logout` | 登录含强改密 | `{}` → `{loggedOut:true}` | 撤销会话并清Cookie；不依赖前端删除状态 |
+| AUTH-06 | POST `/auth/phone-codes` | G | `{phone:string,role:PARTICIPANT或ORGANIZER,purpose:LOGIN或REGISTER或RESET_PASSWORD或RECOVERY_CONTACT或CHANGE_PHONE}` → `{verificationId:uuid,expiresAt:time,resendAfterSeconds:60,delivery:LOCAL_CONSOLE}` | 200；CHANGE_PHONE须P/O登录且角色匹配、校验新号同角色未占用；本地终端输出六位码，5分钟有效；同手机同角色60秒冷却；不返回验证码或账号是否存在 |
+| AUTH-07 | POST `/auth/phone-login` | G | `{phone:string,role:PARTICIPANT或ORGANIZER,verificationId:uuid,verificationCode:string,purpose:LOGIN或REGISTER}` → UserView或ForcePasswordUser | 200设置7天Cookie，撤销旧会话；验证码一次性；REGISTER用途用于用户确认登录同角色原账号；验证后未注册404 PHONE_NOT_REGISTERED |
+| AUTH-08 | POST `/auth/password-reset` | G | `{phone,role:PARTICIPANT或ORGANIZER,verificationId,verificationCode,newPassword}` → `{changed:true,requiresLogin:true}` | RESET_PASSWORD验证码一次消费；不要求原密码；设置本人新密码、撤销旧会话、清Cookie；不得用其他用途验证码 |
 | ME-01 | GET `/me` | 登录含强改密 | 无 → UserView或ForcePasswordUser | 强改密使用独立最小模型；不返回完整手机号给展示页 |
-| ME-02 | PATCH `/me/profile` | P/O | `{displayName:string}` → Mutation<UserView> | 本人姓名更改，不改历史姓名；不接受手机号/角色/邮箱修改 |
+| ME-02 | PATCH `/me/profile` | P/O | `{displayName:string}` → Mutation<UserView> | 本人姓名更改，不改历史姓名；不接受角色/邮箱修改；手机号通过ME-27换绑 |
 | ME-03 | POST `/me/password` | 登录含强改密 | `{oldPassword,newPassword}` → `{changed:true,requiresLogin:true}` | 校验原密码；重置后用初始/临时密码作为oldPassword；撤销全部会话并清Cookie |
 | ME-04 | GET `/me/closure-eligibility` | P/O | 无 → ClosureEligibility | 查询提示不构成注销授权；写时重查 |
 | ME-05 | POST `/me/closure` | P/O | `{password,confirmation:"CLOSE"}` → `{closed:true,requiresLogin:true}` | 未结业务阻止；O另查待审/未结束发布；365天/第三次黑名单；立即撤销 |
+| ME-27 | PATCH `/me/phone` | P/O本人 | `{newPhone:string,verificationId:uuid,verificationCode:string}` → `{maskedPhone:string,requiresLogin:true}` | CHANGE_PHONE新号验证码即可；不收原号验证码/密码；校验同角色占用、更新登录联系方式并撤销会话清Cookie，保留原业务身份与订单事实；Idempotency-Key必需 |
 
 ### 4.2 公开读取（catalog/search）
 
@@ -408,11 +416,11 @@ MGT-03/04允许管理员按明确exportId查看/下载，O必须当前仍归属�
 | ADM-02 | POST `/admin/accounts` | A | `{username,initialPassword,role:ADMIN或CHECKER,sessionId?:uuid}` → ManagedAccount | 201；C必绑已存在场次，A不得绑场次；C仅可配置待审/已发布未结束场次；所有新A强改密 |
 | ADM-03 | PATCH `/admin/accounts/{accountId}` | A | `{expectedVersion,enabled?:boolean,assignedSessionId?:uuid}` → Mutation<ManagedAccount> | 仅管理A/C停用/启用，只有C可改绑且同活动未结束；末个可用账号保护；停用/改绑撤销旧会话 |
 | ADM-04 | DELETE `/admin/accounts/{accountId}` | A | query `expectedVersion` → Mutation<ManagedAccount> | 仅逻辑删除管理员/检票账号；末个检票保护；不删历史；为可运维性拒绝删除/停用最后一个可用管理员 |
-| ADM-05 | POST `/admin/accounts/{accountId}/password-reset` | A | `{initialPassword,reason,recoveryRequestId?:uuid}` → `{accountId,reset:true,mustChangePassword:true}` | 所有重置撤销会话；P/O必须有VERIFIED且targetAccountId匹配的找回依据；禁止重置已删除或因活动终止失效的C；不恢复账号 |
+| ADM-05 | POST `/admin/accounts/{accountId}/password-reset` | A | `{initialPassword,reason,recoveryRequestId?:uuid}` → `{accountId,reset:true,mustChangePassword:true}` | 所有重置撤销会话；P/O必须有VERIFIED且targetAccountId匹配、当前号码已验证码验证的完整申诉；同事务换绑、重置及提交后本地短信通知；禁止重置已删除或因活动终止失效的C；不恢复账号 |
 | ADM-06 | GET `/admin/recoveries` | A | `status?,page?,pageSize?` → Page<RecoveryView> | 人工核验请求列表；createdAt asc,id asc |
-| ADM-07 | POST `/admin/recoveries/{requestId}/resolution` | A | `{decision:VERIFIED或REJECTED,verificationNote:string}` → RecoveryView | 保存线下核验依据；VERIFIED只是允许ADM-05，不直接改密码；note1～2000字 |
+| ADM-07 | POST `/admin/recoveries/{requestId}/resolution` | A | `{decision:VERIFIED或REJECTED,verificationNote:string,initialPassword?:string,reason?:string}` → RecoveryView | note10～2000字；VERIFIED并提供initialPassword时，同事务完成审核、换绑、改密、撤会话和提交后通知；不提供密码则等待ADM-05 |
 
-找回状态实现细化：PENDING → VERIFIED或REJECTED；VERIFIED经ADM-05成功重置后变RESOLVED。ADM-07仅能处理PENDING；ADM-05消费已核验依据一次，记录关联账号及操作，不凭手机号直接重置。管理员重置P/O不等于允许任意修改这些用户角色/业务限制。最后管理员保护为本次设计新增运维约束。
+找回状态：PENDING → VERIFIED或REJECTED；VERIFIED经ADM-05成功重置后变RESOLVED；ADM-07携带临时密码通过审核时，同一事务直接到RESOLVED。ADM-07仅能处理PENDING；ADM-05消费已核验依据一次，记录关联账号及操作，不凭手机号直接重置。管理员重置P/O不等于允许任意修改这些用户角色/业务限制。最后管理员保护为本次设计新增运维约束。
 
 VERIFIED之前必须确认targetAccountId存在、未删除，且登记手机号与该账号当前身份匹配；重置时再次核对。旧账号注销/删除使其未完成找回依据失效，不得转用于占用了相同用户名的新账号。resolvedAt用于RESOLVED/REJECTED完成时刻，VERIFIED尚未实际重置时仍null。
 

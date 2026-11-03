@@ -21,7 +21,7 @@ export const router = createRouter({
       path: `/${name}`,
       component: () => import('../views/AuthView.vue'),
       meta: {
-        title: { login: '登录', register: '注册', recover: '人工找回' }[name],
+        title: { login: '登录', register: '注册', recover: '找回密码' }[name],
         authPage: true,
       },
     })),

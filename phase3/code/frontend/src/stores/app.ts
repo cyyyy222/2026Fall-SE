@@ -43,6 +43,16 @@ export const useAppStore = defineStore('app', () => {
     user.value = await post<User>('/auth/login', { username, password });
     return home.value;
   }
+  async function phoneLogin(input: {
+    phone: string;
+    role: string;
+    verificationId: string;
+    verificationCode: string;
+    purpose: 'LOGIN' | 'REGISTER';
+  }) {
+    user.value = await post<User>('/auth/phone-login', input);
+    return home.value;
+  }
   async function logout() {
     try {
       await post('/auth/logout');
@@ -50,5 +60,16 @@ export const useAppStore = defineStore('app', () => {
       user.value = null;
     }
   }
-  return { user, initialized, notification, home, toast, error, initialize, login, logout };
+  return {
+    user,
+    initialized,
+    notification,
+    home,
+    toast,
+    error,
+    initialize,
+    login,
+    phoneLogin,
+    logout,
+  };
 });

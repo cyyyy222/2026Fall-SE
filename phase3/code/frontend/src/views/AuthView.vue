@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAppStore } from '../stores/app';
 import { post, isMock } from '../api/client';
@@ -7,12 +7,29 @@ import { useTask } from '../composables/useTask';
 import type { Role } from '../types';
 import AppIcon from '../components/AppIcon.vue';
 import PosterArt from '../components/PosterArt.vue';
+import AppModal from '../components/AppModal.vue';
+import { ApiError } from '../api/errors';
+import AccountRecoveryPanel from '../components/AccountRecoveryPanel.vue';
 const route = useRoute();
 const router = useRouter();
 const app = useAppStore();
 const task = useTask();
+const codeTask = useTask();
+const loginMethod = ref<'password' | 'phone'>('password');
+const verificationId = ref('');
+const verificationCode = ref('');
+const challengeScope = ref('');
+const duplicateAccount = ref(false);
+const resendAt = ref(0);
+const clockNow = ref(Date.now());
+const timer = setInterval(() => {
+  clockNow.value = Date.now();
+}, 1000);
+onUnmounted(() => clearInterval(timer));
+const resendSeconds = computed(() =>
+  Math.max(0, Math.ceil((resendAt.value - clockNow.value) / 1000)),
+);
 const mode = computed(() => route.path.slice(1));
-const complete = ref(false);
 const fields = reactive({
   username: '',
   password: '',
@@ -21,6 +38,65 @@ const fields = reactive({
   phone: '',
   role: 'PARTICIPANT' as Role,
 });
+const codePurpose = computed(() => (mode.value === 'register' ? 'REGISTER' : 'LOGIN'));
+const scope = computed(() => `${fields.phone}:${fields.role}:${codePurpose.value}`);
+watch(scope, () => {
+  verificationId.value = '';
+  verificationCode.value = '';
+  challengeScope.value = '';
+  resendAt.value = 0;
+});
+async function sendCode() {
+  await codeTask.run(async () => {
+    if (!/^1\d{10}$/.test(fields.phone)) throw new Error('请先填写有效的11位手机号');
+    const requestedScope = scope.value;
+    const receipt = await post<{ verificationId: string; resendAfterSeconds: number }>(
+      '/auth/phone-codes',
+      {
+        phone: fields.phone,
+        role: fields.role,
+        purpose: codePurpose.value,
+      },
+    );
+    if (scope.value !== requestedScope) {
+      app.toast('手机号或角色已变化，请重新获取验证码', 'error');
+      return;
+    }
+    verificationId.value = receipt.verificationId;
+    challengeScope.value = requestedScope;
+    verificationCode.value = '';
+    clockNow.value = Date.now();
+    resendAt.value = Date.now() + receipt.resendAfterSeconds * 1000;
+    app.toast('验证码已输出到本地Java后端终端，有效期5分钟');
+  });
+}
+function phoneInput(purpose: 'LOGIN' | 'REGISTER') {
+  if (!verificationId.value || challengeScope.value !== scope.value)
+    throw new Error('手机号或角色已变化，请重新获取验证码');
+  return {
+    phone: fields.phone,
+    role: fields.role,
+    verificationId: verificationId.value,
+    verificationCode: verificationCode.value,
+    purpose,
+  };
+}
+async function finishLogin(home: string) {
+  const redirect =
+    typeof route.query.redirect === 'string' &&
+    route.query.redirect.startsWith('/') &&
+    !route.query.redirect.startsWith('//')
+      ? route.query.redirect
+      : home;
+  await router.push(app.user?.mustChangePassword ? '/force-password' : redirect);
+}
+async function loginExisting() {
+  await task.run(async () => {
+    const home = await app.phoneLogin(phoneInput('REGISTER'));
+    duplicateAccount.value = false;
+    await finishLogin(home);
+  });
+}
 const showHttpDemos = !isMock && import.meta.env.VITE_DEMO_ACCOUNTS === 'true';
 const demos = isMock
   ? [
@@ -36,6 +112,7 @@ const demos = isMock
       ['admin_demo', '管理员', 'ShieldCheck'],
     ];
 function selectDemo(username: string) {
+  loginMethod.value = 'password';
   fields.username = username;
   fields.password = isMock
     ? 'Demo2026'
@@ -53,28 +130,32 @@ const title = computed(() =>
 async function submit() {
   await task.run(async () => {
     if (mode.value === 'login') {
-      const home = await app.login(fields.username, fields.password);
-      const redirect =
-        typeof route.query.redirect === 'string' &&
-        route.query.redirect.startsWith('/') &&
-        !route.query.redirect.startsWith('//')
-          ? route.query.redirect
-          : home;
-      await router.push(app.user?.mustChangePassword ? '/force-password' : redirect);
+      const home =
+        loginMethod.value === 'phone'
+          ? await app.phoneLogin(phoneInput('LOGIN'))
+          : await app.login(fields.username, fields.password);
+      await finishLogin(home);
     } else if (mode.value === 'register') {
       if (fields.password !== fields.confirmPassword) throw new Error('两次密码输入不一致');
-      await post('/auth/register', {
-        username: fields.username,
-        password: fields.password,
-        email: fields.email,
-        phone: fields.phone,
-        role: fields.role,
-      });
+      try {
+        await post('/auth/register', {
+          username: fields.username,
+          password: fields.password,
+          email: fields.email.trim() || null,
+          phone: fields.phone,
+          role: fields.role,
+          verificationId: phoneInput('REGISTER').verificationId,
+          verificationCode: verificationCode.value,
+        });
+      } catch (e) {
+        if (e instanceof ApiError && e.code === 'PHONE_ACCOUNT_EXISTS') {
+          duplicateAccount.value = true;
+          return;
+        }
+        throw e;
+      }
       app.toast('注册成功，请使用新账号登录');
       await router.push('/login');
-    } else {
-      await post('/auth/recoveries', { account: fields.username, phone: fields.phone });
-      complete.value = true;
     }
   });
 }
@@ -97,20 +178,34 @@ async function submit() {
               ? '登录账号，继续探索值得期待的现场。'
               : mode === 'register'
                 ? '一个账号，一种身份，一份属于你的期待。'
-                : '提交登记账号与手机号，由管理员线下核验。'
+                : '优先通过手机号验证码找回，原号不可用时提交详细申诉。'
           }}
         </p>
-        <template v-if="complete"
-          ><div class="alert">
-            <AppIcon name="CheckCircle2" />
-            <p>申请已登记，请等待管理员线下核验。提交手机号不会直接重置密码。</p>
-          </div>
-          <RouterLink class="btn primary full" to="/login" style="margin-top: 24px"
-            >返回登录</RouterLink
-          ></template
-        >
+        <AccountRecoveryPanel v-if="mode === 'recover'" />
         <form v-else class="auth-form" @submit.prevent="submit">
-          <div v-if="mode === 'register'" class="registration-role">
+          <div v-if="mode === 'login'" class="tabs" aria-label="登录方式">
+            <button
+              type="button"
+              :class="{ active: loginMethod === 'password' }"
+              @click="loginMethod = 'password'"
+            >
+              账号密码登录
+            </button>
+            <button
+              type="button"
+              :class="{ active: loginMethod === 'phone' }"
+              @click="loginMethod = 'phone'"
+            >
+              手机号验证码登录
+            </button>
+          </div>
+          <p v-if="mode === 'login' && loginMethod === 'phone'" class="field-help">
+            请选择要登录的身份；管理员和检票员请使用账号密码登录。
+          </p>
+          <div
+            v-if="mode === 'register' || (mode === 'login' && loginMethod === 'phone')"
+            class="registration-role"
+          >
             <button
               type="button"
               class="choice"
@@ -127,7 +222,7 @@ async function submit() {
               我是组织者<small>创建活动，发起相聚</small>
             </button>
           </div>
-          <div class="form-field">
+          <div v-if="mode !== 'login' || loginMethod === 'password'" class="form-field">
             <label for="username">{{ mode === 'recover' ? '登记账号' : '用户名' }}</label
             ><input
               id="username"
@@ -138,7 +233,7 @@ async function submit() {
               maxlength="60"
             />
           </div>
-          <div v-if="mode !== 'login'" class="form-field">
+          <div v-if="mode !== 'login' || loginMethod === 'phone'" class="form-field">
             <label for="phone">登记手机号</label
             ><input
               id="phone"
@@ -150,18 +245,58 @@ async function submit() {
               placeholder="请输入11位手机号"
             />
           </div>
+          <p v-if="mode === 'register'" class="field-help">
+            同一手机号可分别注册一个参与者账号和一个组织者账号；同角色内不能重复。用户名须唯一；邮箱可留空，填写时不得与其他有效账号重复。
+          </p>
+          <div
+            v-if="mode === 'register' || (mode === 'login' && loginMethod === 'phone')"
+            class="form-field"
+          >
+            <label for="phone-code">手机验证码</label>
+            <div class="verification-input">
+              <input
+                id="phone-code"
+                v-model="verificationCode"
+                required
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                pattern="[0-9]{6}"
+                maxlength="6"
+                placeholder="请输入6位验证码"
+              />
+              <button
+                type="button"
+                class="btn secondary"
+                :disabled="codeTask.busy.value || resendSeconds > 0"
+                @click="sendCode"
+              >
+                {{ resendSeconds ? `${resendSeconds}秒后重发` : '获取验证码' }}
+              </button>
+            </div>
+            <small>本地联调：验证码输出在Java后端终端，不会真正发送短信。</small>
+            <p v-if="codeTask.error.value" class="error-inline" role="alert">
+              {{ codeTask.error.value }}
+            </p>
+          </div>
+          <div v-if="mode === 'recover'" class="alert info">
+            <p>
+              填写注册用户名和当时登记的手机号，提交后会进入管理员的“账号找回申请”。平台工作人员通过当面核对或已有联系渠道确认本人身份，再重置临时密码；这里不会自动发短信或直接修改密码。管理员、检票员请联系平台管理员处理。
+            </p>
+          </div>
           <div v-if="mode === 'register'" class="form-field">
-            <label for="email">邮箱</label
+            <label for="email">邮箱（选填）</label
             ><input
               id="email"
               v-model="fields.email"
               type="email"
-              required
               autocomplete="email"
-              placeholder="请输入邮箱"
+              placeholder="选填，例如12345@qq.com或name@163.com"
             />
           </div>
-          <div v-if="mode !== 'recover'" class="form-field">
+          <div
+            v-if="mode !== 'recover' && (mode !== 'login' || loginMethod === 'password')"
+            class="form-field"
+          >
             <label for="password">密码</label
             ><input
               id="password"
@@ -170,6 +305,9 @@ async function submit() {
               required
               :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
               :minlength="mode === 'register' ? 8 : undefined"
+              :pattern="
+                mode === 'register' ? '(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{8,72}' : undefined
+              "
               maxlength="72"
               :placeholder="mode === 'register' ? '至少8位，同时包含字母和数字' : '请输入密码'"
             />
@@ -238,4 +376,25 @@ async function submit() {
       </p>
     </div>
   </div>
+  <AppModal
+    :open="duplicateAccount"
+    title="这个手机号已有账号，是你的吗？"
+    @close="duplicateAccount = false"
+  >
+    <p>
+      你已验证这个手机号。当前{{
+        fields.role === 'ORGANIZER' ? '组织者' : '参与者'
+      }}身份已有账号，不能重复注册；如果是你的账号，可以直接登录。
+    </p>
+    <p class="field-help">
+      如果不是你的账号，请联系平台工作人员核实手机号归属，不能覆盖或删除原账号。另一种身份仍可单独注册。
+    </p>
+    <p v-if="task.error.value" class="error-inline">{{ task.error.value }}</p>
+    <div class="button-row">
+      <button class="btn secondary" @click="duplicateAccount = false">不是我的，返回核实</button
+      ><button class="btn primary" :disabled="task.busy.value" @click="loginExisting">
+        这是我的账号，直接登录
+      </button>
+    </div>
+  </AppModal>
 </template>

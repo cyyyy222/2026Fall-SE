@@ -1,3 +1,5 @@
+> 2026-11-03 用户最新确认：同手机号可分别拥有参与者/组织者账号，同角色内唯一；新增本地验证码注册/登录，管理员账号分类与检票凭据交接见[账号与登录调整](account-auth-update.md)，该调整优先于旧版相关口径。
+
 # MySQL 数据库设计与建表命令（审阅稿）
 
 版本：v0.1 · 2026-11-02 · **未连接、未执行、未验证真实 MySQL DDL**。
@@ -82,9 +84,10 @@ SQL 使用 MySQL 8.4 / InnoDB。当前工程关闭 Flyway、SQL 初始化及自�
 | `id` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | N | 账号UUID；不因重注册复用 |
 | `username` | `VARCHAR(60)` | N | 用户名展示原值 |
 | `username_normalized` | `VARCHAR(60)` | N | trim并只折叠ASCII大小写 |
-| `email` | `VARCHAR(254)` | Y | P/O必填，A/C可空 |
+| `email` | `VARCHAR(254)` | Y | 所有角色可空；填写时通用邮箱校验，不设后缀白名单 |
 | `email_normalized` | `VARCHAR(254)` | Y | 邮箱规范值 |
 | `phone_identity_id` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | Y | P/O必有长期手机号身份 |
+| `login_phone_identity_id` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | Y | 当前登录号码；空时沿用原phone_identity_id，原字段保留业务身份 |
 | `password_hash` | `VARCHAR(100)` | N | BCrypt，不存原文 |
 | `role` | `VARCHAR(20)` | N | PARTICIPANT/ORGANIZER/CHECKER/ADMIN |
 | `display_name` | `VARCHAR(60)` | Y | 本人姓名，可重名 |
@@ -101,12 +104,12 @@ SQL 使用 MySQL 8.4 / InnoDB。当前工程关闭 Flyway、SQL 初始化及自�
 - `FOREIGN KEY (phone_identity_id) REFERENCES phone_identities(id) ON DELETE RESTRICT ON UPDATE RESTRICT`
 - `active_username VARCHAR(60) GENERATED ALWAYS AS (CASE WHEN deleted_at_ms IS NULL THEN username_normalized ELSE NULL END) STORED`
 - `active_email VARCHAR(254) GENERATED ALWAYS AS (CASE WHEN deleted_at_ms IS NULL THEN email_normalized ELSE NULL END) STORED`
-- `active_phone_identity_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin GENERATED ALWAYS AS (CASE WHEN deleted_at_ms IS NULL THEN phone_identity_id ELSE NULL END) STORED`
+- `active_phone_identity_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin GENERATED ALWAYS AS (CASE WHEN deleted_at_ms IS NULL THEN COALESCE(login_phone_identity_id,phone_identity_id) ELSE NULL END) STORED`
 - `UNIQUE KEY uk_user_name (active_username)`
 - `UNIQUE KEY uk_user_email (active_email)`
-- `UNIQUE KEY uk_user_phone (active_phone_identity_id)`
+- `UNIQUE KEY uk_user_phone_role (active_phone_identity_id,role)`
 - `CHECK (role IN ('PARTICIPANT','ORGANIZER','CHECKER','ADMIN'))`
-- `CHECK (role NOT IN ('PARTICIPANT','ORGANIZER') OR (email IS NOT NULL AND email_normalized IS NOT NULL AND phone_identity_id IS NOT NULL))`
+- `CHECK (role NOT IN ('PARTICIPANT','ORGANIZER') OR phone_identity_id IS NOT NULL)`
 - `KEY ix_users_admin (role,created_at_ms,id)`
 
 ### login_sessions
@@ -141,7 +144,12 @@ SQL 使用 MySQL 8.4 / InnoDB。当前工程关闭 Flyway、SQL 初始化及自�
 | `id` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | N | 找回请求UUID |
 | `account` | `VARCHAR(60)` | N | 请求填写账号 |
 | `account_normalized` | `VARCHAR(60)` | N | 规范化账号 |
-| `phone` | `VARCHAR(11)` | N | 受理时填写手机号 |
+| `phone` | `VARCHAR(11)` | N | 丢失访问时原账号实际绑定手机号 |
+| `current_phone` | `VARCHAR(11)` | Y | 申诉当前可用手机号；新申请必填 |
+| `role` | `VARCHAR(20)` | Y | 原账号P/O角色；新申请必填 |
+| `statement` | `VARCHAR(2000)` | Y | 申诉陈述20～2000字；新申请必填 |
+| `past_behavior` | `VARCHAR(2000)` | Y | 本人以往行为20～2000字；新申请必填 |
+| `contact_verified_at_ms` | `BIGINT` | Y | 当前手机号验证码通过时间；旧缺失申请不可直接改密 |
 | `target_account_id` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | Y | 受理时匹配账号，无匹配为NULL |
 | `status` | `VARCHAR(20)` | N | PENDING/VERIFIED/RESOLVED/REJECTED |
 | `verification_note` | `VARCHAR(2000)` | Y | 人工核验说明 |
@@ -934,6 +942,7 @@ CREATE TABLE users (
   email VARCHAR(254) NULL,
   email_normalized VARCHAR(254) NULL,
   phone_identity_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  login_phone_identity_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
   password_hash VARCHAR(100) NOT NULL,
   role VARCHAR(20) NOT NULL,
   display_name VARCHAR(60) NULL,
@@ -945,14 +954,15 @@ CREATE TABLE users (
   updated_at_ms BIGINT NOT NULL,
   version BIGINT NOT NULL,
   FOREIGN KEY (phone_identity_id) REFERENCES phone_identities(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT fk_user_login_phone FOREIGN KEY (login_phone_identity_id) REFERENCES phone_identities(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
   active_username VARCHAR(60) GENERATED ALWAYS AS (CASE WHEN deleted_at_ms IS NULL THEN username_normalized ELSE NULL END) STORED,
   active_email VARCHAR(254) GENERATED ALWAYS AS (CASE WHEN deleted_at_ms IS NULL THEN email_normalized ELSE NULL END) STORED,
-  active_phone_identity_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin GENERATED ALWAYS AS (CASE WHEN deleted_at_ms IS NULL THEN phone_identity_id ELSE NULL END) STORED,
+  active_phone_identity_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin GENERATED ALWAYS AS (CASE WHEN deleted_at_ms IS NULL THEN COALESCE(login_phone_identity_id,phone_identity_id) ELSE NULL END) STORED,
   UNIQUE KEY uk_user_name (active_username),
   UNIQUE KEY uk_user_email (active_email),
-  UNIQUE KEY uk_user_phone (active_phone_identity_id),
+  UNIQUE KEY uk_user_phone_role (active_phone_identity_id,role),
   CHECK (role IN ('PARTICIPANT','ORGANIZER','CHECKER','ADMIN')),
-  CHECK (role NOT IN ('PARTICIPANT','ORGANIZER') OR (email IS NOT NULL AND email_normalized IS NOT NULL AND phone_identity_id IS NOT NULL)),
+  CONSTRAINT ck_user_phone_required CHECK (role NOT IN ('PARTICIPANT','ORGANIZER') OR phone_identity_id IS NOT NULL),
   KEY ix_users_admin (role,created_at_ms,id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin;
 
@@ -981,6 +991,11 @@ CREATE TABLE recoveries (
   account VARCHAR(60) NOT NULL,
   account_normalized VARCHAR(60) NOT NULL,
   phone VARCHAR(11) NOT NULL,
+  current_phone VARCHAR(11) NULL,
+  role VARCHAR(20) NULL,
+  `statement` VARCHAR(2000) NULL,
+  past_behavior VARCHAR(2000) NULL,
+  contact_verified_at_ms BIGINT NULL,
   target_account_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
   status VARCHAR(20) NOT NULL,
   verification_note VARCHAR(2000) NULL,

@@ -4,11 +4,12 @@ import { useRoute, useRouter } from 'vue-router';
 import { get, patch, post, isMock } from '../api/client';
 import { useAppStore } from '../stores/app';
 import { useTask } from '../composables/useTask';
-import type { Mutation, User } from '../types';
+import type { Mutation, User, PhoneProof, Role } from '../types';
 import { dateTime, roleNames } from '../utils/format';
 import PageHeading from '../components/PageHeading.vue';
 import AppIcon from '../components/AppIcon.vue';
 import AppModal from '../components/AppModal.vue';
+import PhoneVerification from '../components/PhoneVerification.vue';
 const app = useAppStore();
 const route = useRoute();
 const router = useRouter();
@@ -16,6 +17,9 @@ const task = useTask();
 const forced = computed(() => route.path === '/force-password');
 const normal = computed(() => ['PARTICIPANT', 'ORGANIZER'].includes(app.user?.role || ''));
 const displayName = ref(app.user?.displayName || '');
+const phoneModal = ref(false);
+const newPhone = ref('');
+const phoneProof = ref<PhoneProof | null>(null);
 const passwords = reactive({ oldPassword: '', newPassword: '', confirm: '' });
 const closeModal = ref(false);
 const resetModal = ref(false);
@@ -31,6 +35,21 @@ async function saveProfile() {
     const r = await patch<Mutation<User>>('/me/profile', { displayName: displayName.value });
     app.user = r.current;
   }, '本人资料已更新，历史订单姓名保持原快照');
+}
+async function changePhone() {
+  await task.run(async () => {
+    if (!phoneProof.value) throw new Error('请先获取并填写新手机号验证码');
+    await patch('/me/phone', { newPhone: newPhone.value, ...phoneProof.value });
+    phoneModal.value = false;
+    app.user = null;
+    app.toast('手机号已换绑，请使用新手机号验证码或原账号密码重新登录');
+    await router.push('/login');
+  });
+}
+function openPhone() {
+  phoneModal.value = true;
+  newPhone.value = '';
+  phoneProof.value = null;
 }
 async function changePassword() {
   await task.run(async () => {
@@ -97,7 +116,7 @@ onMounted(loadClosure);
         </div>
       </div>
       <div class="divider" />
-      <p class="field-help">账号不支持切换角色或修改手机号。</p>
+      <p class="field-help">账号角色固定；普通用户可在右侧本人资料中换绑登录手机号。</p>
     </aside>
     <div>
       <section v-if="normal && !forced" class="panel account-section">
@@ -113,6 +132,9 @@ onMounted(loadClosure);
             <div class="form-field">
               <label>账号手机号 · 只读</label
               ><input :value="app.user?.maskedPhone || '—'" readonly aria-label="账号手机号" />
+              <button type="button" class="text-link" style="margin-top: 8px" @click="openPhone">
+                换绑手机号</button
+              ><small>仅验证新手机号，同角色内不能重复绑定。</small>
             </div>
           </div>
           <p class="field-help">更新资料不会更改历史订单的姓名快照。</p>
@@ -237,4 +259,35 @@ onMounted(loadClosure);
       ><button class="btn primary" @click="reset">确认重置演示</button>
     </div></AppModal
   >
+  <AppModal :open="phoneModal" title="换绑手机号" @close="phoneModal = false">
+    <form @submit.prevent="changePhone">
+      <p class="field-help">
+        当前绑定：{{ app.user?.maskedPhone }}。只验证新手机号，不需要原手机号验证码。
+      </p>
+      <div class="form-field">
+        <label for="new-bound-phone">新手机号</label
+        ><input
+          id="new-bound-phone"
+          v-model="newPhone"
+          required
+          inputmode="tel"
+          autocomplete="tel"
+          maxlength="11"
+          pattern="1[0-9]{10}"
+        />
+      </div>
+      <PhoneVerification
+        v-if="phoneModal"
+        v-model="phoneProof"
+        :phone="newPhone"
+        :role="(app.user?.role || 'PARTICIPANT') as Role"
+        purpose="CHANGE_PHONE"
+      />
+      <p v-if="task.error.value" class="error-inline" role="alert">{{ task.error.value }}</p>
+      <div class="button-row">
+        <button type="button" class="btn secondary" @click="phoneModal = false">取消</button
+        ><button class="btn primary" :disabled="task.busy.value">确认换绑</button>
+      </div>
+    </form>
+  </AppModal>
 </template>

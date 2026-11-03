@@ -1,4 +1,10 @@
 export type Role = 'PARTICIPANT' | 'ORGANIZER' | 'CHECKER' | 'ADMIN';
+export type PhoneCodePurpose =
+  'LOGIN' | 'REGISTER' | 'RESET_PASSWORD' | 'RECOVERY_CONTACT' | 'CHANGE_PHONE';
+export interface PhoneProof {
+  verificationId: string;
+  verificationCode: string;
+}
 export type EventStatus =
   'DRAFT' | 'PENDING_REVIEW' | 'PUBLISHED' | 'CANCELLED' | 'TAKEN_DOWN' | 'ENDED';
 export type OrderStatus =
@@ -156,6 +162,7 @@ export interface Result<T> {
   data: T;
   traceId: string;
   serverTime: string;
+  errors?: { field: string; code: string; message: string }[];
 }
 export interface Mutation<T> {
   operationId: string;
@@ -240,6 +247,7 @@ export interface ManagedAccount {
   id: string;
   username: string;
   role: Role;
+  maskedPhone: string | null;
   enabled: boolean;
   deletedAt: string | null;
   mustChangePassword: boolean;

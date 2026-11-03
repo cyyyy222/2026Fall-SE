@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { before, beforeEach, test } from 'node:test';
 import { randomUUID } from 'node:crypto';
-import type { CampusEvent, Order, Page, PaymentAudit, Ticket } from '../src/types/index';
+import type {
+  CampusEvent,
+  Order,
+  Page,
+  PaymentAudit,
+  Ticket,
+  Role,
+  PhoneCodePurpose,
+} from '../src/types/index';
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -186,4 +194,235 @@ test('organizer CSV has BOM and headers and cannot remove the last checker', asy
     }),
     hasCode('LAST_CHECKER_REQUIRED'),
   );
+});
+
+async function phoneCode(phone: string, role: Role, purpose: PhoneCodePurpose) {
+  const original = console.info;
+  let code = '';
+  console.info = (message: string) => {
+    code = /code=(\d{6})/.exec(message)?.[1] || '';
+  };
+  try {
+    const receipt = await call<{ verificationId: string }>('POST', '/auth/phone-codes', {
+      phone,
+      role,
+      purpose,
+    });
+    assert.match(code, /^\d{6}$/);
+    assert.equal('code' in receipt, false);
+    return { verificationId: receipt.verificationId, verificationCode: code };
+  } finally {
+    console.info = original;
+  }
+}
+
+test('registration allows omitted emails and common QQ suffixes', async () => {
+  for (const [i, email] of [undefined, '', '123456@qq.com', 'student@nju.edu.cn'].entries()) {
+    const phone = `1392222000${i}`;
+    const proof = await phoneCode(phone, 'PARTICIPANT', 'REGISTER');
+    await call('POST', '/auth/register', {
+      username: `mail_${i}`,
+      password: 'Testpass123',
+      phone,
+      role: 'PARTICIPANT',
+      ...(email === undefined ? {} : { email }),
+      ...proof,
+    });
+    const user = await call<{ email: string | null }>('POST', '/auth/login', {
+      username: `mail_${i}`,
+      password: 'Testpass123',
+    });
+    assert.equal(user.email, email || null);
+  }
+});
+
+test('phone code resets a forgotten password for only the selected role', async () => {
+  const proof = await phoneCode('13812345678', 'PARTICIPANT', 'RESET_PASSWORD');
+  await call('POST', '/auth/password-reset', {
+    phone: '13812345678',
+    role: 'PARTICIPANT',
+    newPassword: 'Changed123',
+    ...proof,
+  });
+  await assert.rejects(login('participant'), hasCode('INVALID_CREDENTIALS'));
+  assert.equal(
+    (
+      await call<{ role: string }>('POST', '/auth/login', {
+        username: 'participant',
+        password: 'Changed123',
+      })
+    ).role,
+    'PARTICIPANT',
+  );
+  assert.ok(await login('organizer'));
+});
+
+test('personal information rebinds with only the new phone code and rejects occupied same-role numbers', async () => {
+  await login('participant');
+  const proof = await phoneCode('13933330001', 'PARTICIPANT', 'CHANGE_PHONE');
+  const result = await call<{ maskedPhone: string; requiresLogin: boolean }>('PATCH', '/me/phone', {
+    newPhone: '13933330001',
+    ...proof,
+  });
+  assert.equal(result.maskedPhone, '139****0001');
+  assert.equal(result.requiresLogin, true);
+  await assert.rejects(call('GET', '/me'), hasCode('AUTH_REQUIRED'));
+  await login('participant');
+  const other = await phoneCode('13933330002', 'PARTICIPANT', 'REGISTER');
+  await call('POST', '/auth/register', {
+    username: 'otherphone',
+    password: 'Testpass123',
+    phone: '13933330002',
+    role: 'PARTICIPANT',
+    ...other,
+  });
+  await assert.rejects(
+    call('POST', '/auth/phone-codes', {
+      phone: '13933330002',
+      role: 'PARTICIPANT',
+      purpose: 'CHANGE_PHONE',
+    }),
+    hasCode('PHONE_ALREADY_BOUND'),
+  );
+});
+
+test('manual recovery keeps detailed evidence, lets admin approve-reset and emits local notification', async () => {
+  const proof = await phoneCode('13944440001', 'PARTICIPANT', 'RECOVERY_CONTACT');
+  const receipt = await call<{ requestId: string }>('POST', '/auth/recoveries', {
+    account: 'participant',
+    phone: '13812345678',
+    currentPhone: '13944440001',
+    role: 'PARTICIPANT',
+    statement: '原手机号码已经无法使用，希望凭过去的资料恢复本人一直使用的账号。',
+    pastBehavior: '我曾报名晚风来信音乐会，可以说明报名时间和票种以及订单状态等信息。',
+    ...proof,
+  });
+  await login('admin');
+  const list = await call<Page<{ id: string; statement: string }>>('GET', '/admin/recoveries');
+  assert.ok(list.items.find((r) => r.id === receipt.requestId)?.statement.includes('原手机号码'));
+  const info = console.info;
+  let notification = '';
+  console.info = (message: string) => {
+    notification = message;
+  };
+  try {
+    const result = await call<{ status: string }>(
+      'POST',
+      `/admin/recoveries/${receipt.requestId}/resolution`,
+      {
+        decision: 'VERIFIED',
+        verificationNote: '已经核对账户原手机号与历史订单陈述，确认申请人为本人。',
+        initialPassword: 'Temporary123',
+        reason: '资料核实通过',
+      },
+    );
+    assert.equal(result.status, 'RESOLVED');
+  } finally {
+    console.info = info;
+  }
+  assert.match(notification, /LOCAL_RECOVERY_SMS.*13944440001.*account=participant/);
+  const user = await call<{ mustChangePassword: boolean; maskedPhone: string }>(
+    'POST',
+    '/auth/login',
+    { username: 'participant', password: 'Temporary123' },
+  );
+  assert.equal(user.mustChangePassword, true);
+  assert.equal(user.maskedPhone, '139****0001');
+  await assert.rejects(call('GET', '/me/orders'), hasCode('PASSWORD_CHANGE_REQUIRED'));
+});
+
+test('verified phone can register each ordinary role once and duplicate consent logs into the existing account', async () => {
+  const phone = '13911112222';
+  let firstId = '';
+  for (const role of ['PARTICIPANT', 'ORGANIZER'] as const) {
+    const proof = await phoneCode(phone, role, 'REGISTER');
+    const r = await call<{ id: string }>('POST', '/auth/register', {
+      username: `phone_${role}`,
+      password: 'Testpass123',
+      email: `${role}@example.test`,
+      phone,
+      role,
+      ...proof,
+    });
+    if (role === 'PARTICIPANT') firstId = r.id;
+    assert.ok(r.id);
+  }
+  // A different fixture phone already has a participant account; verification precedes the prompt.
+  const proof = await phoneCode('13812345678', 'PARTICIPANT', 'REGISTER');
+  await assert.rejects(
+    call('POST', '/auth/register', {
+      username: 'duplicate_phone',
+      password: 'Testpass123',
+      email: 'duplicate@example.test',
+      phone: '13812345678',
+      role: 'PARTICIPANT',
+      ...proof,
+    }),
+    hasCode('PHONE_ACCOUNT_EXISTS'),
+  );
+  const user = await call<{ role: string; username: string }>('POST', '/auth/phone-login', {
+    phone: '13812345678',
+    role: 'PARTICIPANT',
+    purpose: 'REGISTER',
+    ...proof,
+  });
+  assert.equal(user.username, 'participant');
+  assert.equal(user.role, 'PARTICIPANT');
+  await assert.rejects(
+    call('POST', '/auth/phone-login', {
+      phone: '13812345678',
+      role: 'PARTICIPANT',
+      purpose: 'REGISTER',
+      ...proof,
+    }),
+    hasCode('PHONE_CODE_EXPIRED'),
+  );
+  assert.ok(firstId);
+});
+
+test('phone login binds role and purpose, rejects wrong codes and admin account pages filter on the server', async () => {
+  const proof = await phoneCode('13812345678', 'PARTICIPANT', 'LOGIN');
+  await assert.rejects(
+    call('POST', '/auth/phone-login', {
+      phone: '13812345678',
+      role: 'ORGANIZER',
+      purpose: 'LOGIN',
+      ...proof,
+    }),
+    hasCode('PHONE_CODE_EXPIRED'),
+  );
+  await assert.rejects(
+    call('POST', '/auth/phone-login', {
+      phone: '13812345678',
+      role: 'PARTICIPANT',
+      purpose: 'REGISTER',
+      ...proof,
+    }),
+    hasCode('PHONE_CODE_EXPIRED'),
+  );
+  await assert.rejects(
+    call('POST', '/auth/phone-login', {
+      phone: '13812345678',
+      role: 'PARTICIPANT',
+      purpose: 'LOGIN',
+      ...proof,
+      verificationCode: proof.verificationCode === '000000' ? '000001' : '000000',
+    }),
+    hasCode('PHONE_CODE_INVALID'),
+  );
+  assert.equal(
+    (
+      await call<{ role: string }>('POST', '/auth/phone-login', {
+        phone: '13812345678',
+        role: 'PARTICIPANT',
+        purpose: 'LOGIN',
+        ...proof,
+      })
+    ).role,
+    'PARTICIPANT',
+  );
+  await login('admin');
+  const page = await call<Page<{ role: string }>>('GET', '/admin/accounts?role=ORGANIZER');
+  assert.equal(page.total, 1);
+  assert.ok(page.items.every((x) => x.role === 'ORGANIZER'));
 });

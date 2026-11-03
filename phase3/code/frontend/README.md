@@ -1,3 +1,5 @@
+> 2026-11-03最新规则与验证：[注册、验证码找回、详细申诉与个人信息换绑](../../docs/account-recovery-update.md)。邮箱选填；换绑只验证新号，并校验同角色占用；后端58项、前端22项回归通过，真实联调范围见该文。该说明优先于下文旧版相关约束与早期验证记录。
+
 # 活动票务 · 桌面网页前端
 
 Vue 3 + TypeScript + Vite + Vue Router + Pinia。沿用phase2确认的莫兰迪配色、中文衬线标题、插画海报、米白面板和工作台侧栏。
@@ -5,6 +7,8 @@ Vue 3 + TypeScript + Vite + Vue Router + Pinia。沿用phase2确认的莫兰迪�
 **当前本机已切换HTTP，连接Java/MySQL/Redis，后台任务已启用。** 真实演示账号为`participant_demo / organizer_demo / checker_live_demo`，密码`DemoPass123`；管理员`admin_demo`初始密码`AdminDemo123`，首次必须改密。运行方法、全部账号、活动及联调记录见[HTTP演示说明](../../docs/http-demo.md)。须同时启动Java后端；下方mock账号和重置方式仅适用于显式mock模式。
 
 **目标是Windows桌面浏览器网页，不是手机应用。**建议使用Edge或Chrome，窗口宽度1280px以上、缩放100%；页面最小布局宽度1180px。Codex旁侧预览窗太窄时会出现横向滚动，可在独立浏览器窗口打开查看。
+
+2026-11-03：登录支持账密或手机号验证码；注册必须验证手机号。管理员工作台已按四类账号拆分。当前本机验证码查看方法及重复账号确认流程见[账号与登录调整](../../docs/account-auth-update.md)。管理员、检票员使用账密登录。
 
 ## 运行查看
 

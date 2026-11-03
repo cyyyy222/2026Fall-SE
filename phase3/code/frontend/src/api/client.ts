@@ -1,10 +1,10 @@
-import { ApiError } from './errors';
+import { ApiError, apiErrorMessage } from './errors';
 import type { Result } from '../types';
 import { uid } from '../utils/format';
 import { synchronizeClock } from '../utils/clock';
+import { fetchWithCsrf } from './http';
 
 export const isMock = import.meta.env.VITE_API_MODE !== 'http';
-let csrfToken: string | null = null;
 export async function request<T>(
   method: string,
   path: string,
@@ -17,27 +17,14 @@ export async function request<T>(
     synchronizeClock(result.serverTime);
     return result.data;
   }
-  if (method !== 'GET' && !csrfToken)
-    csrfToken = (await request<{ token: string }>('GET', '/auth/csrf')).token;
   const headers: Record<string, string> = {};
   if (body) headers['Content-Type'] = 'application/json';
-  if (csrfToken) headers['X-CSRF-TOKEN'] = csrfToken;
   if (key) headers['Idempotency-Key'] = key;
-  let response: Response;
-  try {
-    response = await fetch(`/api${path}`, {
-      method,
-      credentials: 'same-origin',
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-  } catch {
-    throw new ApiError(
-      'NETWORK_ERROR',
-      '连接失败，操作结果可能尚未确认。请保留原编号并查询订单。',
-      0,
-    );
-  }
+  const response = await fetchWithCsrf(path, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
   if (response.ok && !response.headers.get('content-type')?.includes('application/json'))
     return (await response.blob()) as T;
   if (!response.headers.get('content-type')?.includes('application/json'))
@@ -48,8 +35,7 @@ export async function request<T>(
     );
   const result = (await response.json()) as Result<T>;
   synchronizeClock(result.serverTime);
-  if (!response.ok) throw new ApiError(result.code, result.message, response.status);
-  if (path === '/auth/login' || path === '/auth/logout') csrfToken = null;
+  if (!response.ok) throw new ApiError(result.code, apiErrorMessage(result), response.status);
   return result.data;
 }
 export const get = <T>(path: string) => request<T>('GET', path);
@@ -73,14 +59,12 @@ export async function uploadPoster<T>(
     });
     return put<T>(`/organizer/events/${eventId}/poster`, { expectedVersion, posterData });
   }
-  if (!csrfToken) csrfToken = (await request<{ token: string }>('GET', '/auth/csrf')).token;
   const form = new FormData();
   form.set('file', file);
   form.set('expectedVersion', String(expectedVersion));
-  const response = await fetch(`/api/organizer/events/${eventId}/poster`, {
+  const response = await fetchWithCsrf(`/organizer/events/${eventId}/poster`, {
     method: 'PUT',
-    credentials: 'same-origin',
-    headers: { 'X-CSRF-TOKEN': csrfToken, 'Idempotency-Key': uid() },
+    headers: { 'Idempotency-Key': uid() },
     body: form,
   });
   const result = (await response.json()) as Result<T>;

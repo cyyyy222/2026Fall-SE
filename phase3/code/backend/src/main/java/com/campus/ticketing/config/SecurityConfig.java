@@ -57,6 +57,9 @@ public class SecurityConfig {
                     .requestMatchers(
                         org.springframework.http.HttpMethod.POST,
                         "/api/auth/login",
+                        "/api/auth/phone-codes",
+                        "/api/auth/phone-login",
+                        "/api/auth/password-reset",
                         "/api/auth/register",
                         "/api/auth/recoveries")
                     .permitAll()

@@ -73,34 +73,62 @@ public class IdentityUseCases {
           boolean matches = passwords.matches(request.password(), encoded);
           if (u == null || !matches) throw error(401, "INVALID_CREDENTIALS", "用户名或密码错误");
           available(u);
-          revoke(u.id(), "SECOND_LOGIN");
-          byte[] bytes = new byte[32];
-          random.nextBytes(bytes);
-          String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-          long createdAt = b.now(), expires = createdAt + SESSION_TTL;
-          b.db()
-              .insert(
-                  new LoginSessionEntity(
-                      id(), u.id(), hash(token), createdAt, expires, null, null));
-          b.audit(
-              new RequestContext(
-                  new SessionPrincipal(
-                      u.id(),
-                      Role.valueOf(u.role()),
-                      u.mustChangePassword(),
-                      Instant.ofEpochMilli(expires)),
-                  null,
-                  c.traceId()),
-              "AUTH-02",
-              "ACCOUNT",
-              u.id(),
-              "SUCCESS",
-              null,
-              null);
-          var cookies = new ArrayList<ResponseCookie>();
-          cookies.add(cookie(token, SESSION_TTL));
-          cookies.add(clearedCookies().get(1));
-          return new UseCaseResult<Views.Identity>(200, identity(u, expires), cookies);
+          return issueSession(c, u, "AUTH-02");
+        });
+  }
+
+  private UseCaseResult<Views.Identity> issueSession(RequestContext c, UserEntity u, String api) {
+    revoke(u.id(), "SECOND_LOGIN");
+    byte[] bytes = new byte[32];
+    random.nextBytes(bytes);
+    String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    long createdAt = b.now(), expires = createdAt + SESSION_TTL;
+    b.db()
+        .insert(new LoginSessionEntity(id(), u.id(), hash(token), createdAt, expires, null, null));
+    b.audit(
+        new RequestContext(
+            new SessionPrincipal(
+                u.id(),
+                Role.valueOf(u.role()),
+                u.mustChangePassword(),
+                Instant.ofEpochMilli(expires)),
+            null,
+            c.traceId()),
+        api,
+        "ACCOUNT",
+        u.id(),
+        "SUCCESS",
+        null,
+        null);
+    var cookies = new ArrayList<ResponseCookie>();
+    cookies.add(cookie(token, SESSION_TTL));
+    cookies.add(clearedCookies().get(1));
+    return new UseCaseResult<Views.Identity>(200, identity(u, expires), cookies);
+  }
+
+  public boolean hasPhoneAccount(String phone, RegisterRole role) {
+    return b.read(() -> phoneAccount(phone, role, false) != null);
+  }
+
+  private UserEntity phoneAccount(String phone, RegisterRole role, boolean lock) {
+    var p = b.db().one(PhoneIdentityEntity.class, eq("phone", phone), false).orElse(null);
+    return p == null
+        ? null
+        : b.db()
+            .one(
+                UserEntity.class,
+                and(currentPhoneFilter(p.id()), eq("role", role.name()), nil("deletedAtMs")),
+                lock)
+            .orElse(null);
+  }
+
+  public UseCaseResult<Views.Identity> loginByPhone(RequestContext c, Requests.PhoneLogin r) {
+    return b.write(
+        () -> {
+          var u = phoneAccount(r.phone(), r.role(), true);
+          if (u == null) throw error(404, "PHONE_NOT_REGISTERED", "该手机号尚未注册当前角色，请先注册");
+          available(u);
+          return issueSession(c, u, "AUTH-07");
         });
   }
 
@@ -126,17 +154,21 @@ public class IdentityUseCases {
                               nil("deletedAtMs"),
                               or(
                                   eq("usernameNormalized", normalize(r.username())),
-                                  eq("emailNormalized", normalize(r.email())),
-                                  eq("phoneIdentityId", phone.id()))))
+                                  r.email() == null
+                                      ? null
+                                      : eq("emailNormalized", normalize(r.email())),
+                                  and(
+                                      currentPhoneFilter(phone.id()),
+                                      eq("role", r.role().name())))))
                   == 0,
-              "用户名、邮箱或手机号已被占用");
+              "用户名、邮箱或当前角色的手机号已被占用");
           UserEntity u =
               new UserEntity(
                   id(),
                   trim(r.username()),
                   normalize(r.username()),
-                  trim(r.email()),
-                  normalize(r.email()),
+                  r.email() == null || r.email().isBlank() ? null : trim(r.email()),
+                  r.email() == null || r.email().isBlank() ? null : normalize(r.email()),
                   phone.id(),
                   passwords.encode(r.password()),
                   r.role().name(),
@@ -167,22 +199,31 @@ public class IdentityUseCases {
                           eq("phone", r.phone()),
                           in("status", List.of("PENDING", "VERIFIED"))),
                       true);
-          if (open.isPresent())
+          if (open.isPresent()) {
+            var old = open.get();
+            require(
+                Objects.equals(old.currentPhone(), r.currentPhone())
+                    && Objects.equals(old.role(), r.role().name())
+                    && Objects.equals(old.statement(), trim(r.statement()))
+                    && Objects.equals(old.pastBehavior(), trim(r.pastBehavior())),
+                "RECOVERY_PENDING_EXISTS",
+                "该账号已有待处理申诉，资料不同请联系管理员核对原申请");
             return new UseCaseResult<>(
-                202,
-                new Views.RecoveryReceipt(open.get().id(), "RECEIVED", "已受理，请等待管理员人工核验"),
-                List.of());
+                202, new Views.RecoveryReceipt(old.id(), "RECEIVED", "已受理，请等待管理员审核"), List.of());
+          }
           var target =
               b.db()
                   .one(
                       UserEntity.class,
-                      and(eq("usernameNormalized", normalize(r.account())), nil("deletedAtMs")),
+                      and(
+                          eq("usernameNormalized", normalize(r.account())),
+                          eq("role", r.role().name()),
+                          nil("deletedAtMs")),
                       false)
                   .orElse(null);
-          // Retain the original account ID only if both username and phone matched at acceptance.
           if (target != null
-              && (target.phoneIdentityId() == null
-                  || !b.need(PhoneIdentityEntity.class, target.phoneIdentityId(), false)
+              && (loginPhoneId(target) == null
+                  || !b.need(PhoneIdentityEntity.class, loginPhoneId(target), false)
                       .phone()
                       .equals(r.phone()))) target = null;
           UUID requestId = id();
@@ -199,9 +240,122 @@ public class IdentityUseCases {
                       null,
                       null,
                       b.now(),
-                      null));
+                      null,
+                      r.currentPhone(),
+                      r.role().name(),
+                      trim(r.statement()),
+                      trim(r.pastBehavior()),
+                      b.now()));
+          b.audit(c, "AUTH-04", "RECOVERY", requestId, "SUCCESS", null, null);
           return new UseCaseResult<>(
-              202, new Views.RecoveryReceipt(requestId, "RECEIVED", "已受理，请等待管理员人工核验"), List.of());
+              202, new Views.RecoveryReceipt(requestId, "RECEIVED", "已受理，请等待管理员审核"), List.of());
+        });
+  }
+
+  public UseCaseResult<Views.ChangedPassword> resetPasswordByPhone(
+      RequestContext c, Requests.PhonePasswordReset r) {
+    return b.write(
+        () -> {
+          var u = phoneAccount(r.phone(), r.role(), true);
+          if (u == null) throw error(404, "PHONE_NOT_REGISTERED", "该手机号尚未绑定当前角色的账号");
+          available(u);
+          b.db()
+              .save(
+                  copy(
+                      u,
+                      "passwordHash",
+                      passwords.encode(r.newPassword()),
+                      "mustChangePassword",
+                      false,
+                      "updatedAtMs",
+                      b.now(),
+                      "version",
+                      u.version() + 1));
+          revoke(u.id(), "PHONE_PASSWORD_RESET");
+          b.audit(
+              new RequestContext(
+                  new SessionPrincipal(
+                      u.id(), Role.valueOf(u.role()), false, b.clock.instant().plusSeconds(60)),
+                  null,
+                  c.traceId()),
+              "AUTH-08",
+              "ACCOUNT",
+              u.id(),
+              "SUCCESS",
+              null,
+              null);
+          return new UseCaseResult<>(200, new Views.ChangedPassword(true, true), clearedCookies());
+        });
+  }
+
+  /** Login contact changes; the original business identity and its history remain attached. */
+  public UserEntity bindPhone(UserEntity u, String phone) {
+    valid(List.of("PARTICIPANT", "ORGANIZER").contains(u.role()), "该角色不绑定手机号");
+    var existing = phoneAccount(phone, RegisterRole.valueOf(u.role()), false);
+    require(
+        existing == null || existing.id().equals(u.id()),
+        "PHONE_ALREADY_BOUND",
+        "新手机号已被同角色的其他账号绑定");
+    var target = b.db().one(PhoneIdentityEntity.class, eq("phone", phone), true).orElse(null);
+    if (target == null) {
+      target = new PhoneIdentityEntity(id(), phone, 0, null, null, b.now(), 0L);
+      b.db().insert(target);
+    }
+    require(target.blacklistedAtMs() == null, "PHONE_UNAVAILABLE", "该手机号已被限制绑定，请联系管理员");
+    var changed =
+        copy(
+            u,
+            "loginPhoneIdentityId",
+            target.id(),
+            "updatedAtMs",
+            b.now(),
+            "version",
+            u.version() + 1);
+    b.db().save(changed);
+    return changed;
+  }
+
+  public UseCaseResult<Views.ChangedPhone> changePhone(
+      RequestContext c, Requests.ChangePhone r, Runnable verify) {
+    return b.write(
+        () -> {
+          var actor = b.actor(c, Role.PARTICIPANT, Role.ORGANIZER);
+          var x =
+              b.change(
+                  c,
+                  "ME-27",
+                  actor.id(),
+                  r,
+                  "ACCOUNT",
+                  userId -> {
+                    var u = b.need(UserEntity.class, userId, false);
+                    return new Views.ChangedPhone(
+                        mask(b.need(PhoneIdentityEntity.class, loginPhoneId(u), false).phone()),
+                        true);
+                  },
+                  () -> {
+                    var u = b.need(UserEntity.class, actor.id(), true);
+                    require(
+                        !b.need(PhoneIdentityEntity.class, loginPhoneId(u), false)
+                            .phone()
+                            .equals(r.newPhone()),
+                        "PHONE_UNCHANGED",
+                        "新手机号与当前手机号相同");
+                    verify.run();
+                    bindPhone(u, r.newPhone());
+                    revoke(u.id(), "PHONE_CHANGED");
+                    b.notify(
+                        u.id(),
+                        "PHONE_CHANGED:" + u.id() + ":" + (u.version() + 1),
+                        "ACCOUNT_CHANGED",
+                        "绑定手机号已更新",
+                        "新手机号：" + mask(r.newPhone()) + "。请重新登录；历史订单和业务限制保留。",
+                        "ACCOUNT",
+                        u.id(),
+                        null);
+                    return u.id();
+                  });
+          return new UseCaseResult<>(200, x.current(), clearedCookies());
         });
   }
 
@@ -267,7 +421,7 @@ public class IdentityUseCases {
     String phone =
         u.phoneIdentityId() == null
             ? null
-            : b.need(PhoneIdentityEntity.class, u.phoneIdentityId(), false).phone();
+            : b.need(PhoneIdentityEntity.class, loginPhoneId(u), false).phone();
     var restrictions =
         u.phoneIdentityId() == null
             ? List.<Views.RestrictionView>of()
@@ -275,7 +429,12 @@ public class IdentityUseCases {
                 .list(
                     RestrictionEntity.class,
                     and(
-                        eq("phoneIdentityId", u.phoneIdentityId()),
+                        in(
+                            "phoneIdentityId",
+                            b.governancePhoneIds(
+                                u.phoneIdentityId(),
+                                u.role().equals("ORGANIZER") ? "PUBLISH" : "REGISTER")),
+                        eq("kind", u.role().equals("ORGANIZER") ? "PUBLISH" : "REGISTER"),
                         le("startsAtMs", b.now()),
                         gt("endsAtMs", b.now())))
                 .stream()

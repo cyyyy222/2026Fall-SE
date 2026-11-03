@@ -1,8 +1,12 @@
+> 2026-11-03最新规则与验证：[注册、验证码找回、详细申诉与个人信息换绑](../../docs/account-recovery-update.md)。邮箱选填；换绑只验证新号，并校验同角色占用；后端58项、前端22项回归通过，真实联调范围见该文。该说明优先于下文旧版相关约束与早期验证记录。
+
 # Java 后端业务初版
 
 Java17 / Spring Boot3.5.16 / Maven，Controller → Service → DAO，MySQL + Redis。
 
-89项业务接口已接入具体用例，核心逻辑和参数化DAO已编写。**本机MySQL/Redis已接通，演示数据已导入，前端已切HTTP；后台任务已按用户授权启用。** 账号、数据、真实9组流程联调结果见[HTTP演示说明](../../docs/http-demo.md)。后端42项测试通过，不代表全部需求、并发和故障场景已验收。
+91项业务接口已接入具体用例，核心逻辑和参数化DAO已编写。**本机MySQL/Redis已接通，演示数据已导入，前端已切HTTP；后台任务已按用户授权启用。** 账号、数据、真实9组流程联调结果见[HTTP演示说明](../../docs/http-demo.md)。后端53项测试通过，不代表全部需求、并发和故障场景已验收。
+
+2026-11-03：已加入手机号验证码登录及注册校验，验证码在本地Java终端输出；可用`Get-Content backend-local.log -Tail 20 -Wait`查看。验证码规则、账号四类管理、凭据交接与本次索引迁移见[账号与登录调整](../../docs/account-auth-update.md)。
 
 ## 在VS Code中运行
 
@@ -11,7 +15,7 @@ cd D:\2026Fall-SE\phase3\code\backend
 $env:JAVA_HOME='D:\javajdk17'
 mvn.cmd test
 mvn.cmd package
-& "$env:JAVA_HOME\bin\java.exe" -jar target/ticketing-backend-0.1.0-SNAPSHOT.jar --spring.profiles.active=local-connected --app.jobs.enabled=true
+& "$env:JAVA_HOME\bin\java.exe" -jar target/ticketing-backend-0.1.0-SNAPSHOT.jar --spring.profiles.active=local-connected --app.jobs.enabled=true --logging.file.name=backend-local.log
 ```
 
 本机已验证JDK17.0.17 / Maven3.9.4；也可用项目`mvnw.cmd test`、`mvnw.cmd spring-boot:run`。首次构建需下载依赖，项目设置使用官方中央仓库、本目录`.m2`缓存。打包后也可用JDK17运行`java -jar target/ticketing-backend-0.1.0-SNAPSHOT.jar`。

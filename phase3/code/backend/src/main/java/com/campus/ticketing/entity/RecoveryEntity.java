@@ -14,4 +14,9 @@ public record RecoveryEntity(
     UUID verifiedBy,
     Long verifiedAtMs,
     Long createdAtMs,
-    Long resolvedAtMs) {}
+    Long resolvedAtMs,
+    String currentPhone,
+    String role,
+    String statement,
+    String pastBehavior,
+    Long contactVerifiedAtMs) {}

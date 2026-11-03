@@ -19,4 +19,42 @@ public record UserEntity(
     String unavailableReason,
     Long createdAtMs,
     Long updatedAtMs,
-    Long version) {}
+    Long version,
+    UUID loginPhoneIdentityId) {
+  public UserEntity(
+      UUID id,
+      String username,
+      String usernameNormalized,
+      String email,
+      String emailNormalized,
+      UUID phoneIdentityId,
+      String passwordHash,
+      String role,
+      String displayName,
+      Boolean enabled,
+      Boolean mustChangePassword,
+      Long deletedAtMs,
+      String unavailableReason,
+      Long createdAtMs,
+      Long updatedAtMs,
+      Long version) {
+    this(
+        id,
+        username,
+        usernameNormalized,
+        email,
+        emailNormalized,
+        phoneIdentityId,
+        passwordHash,
+        role,
+        displayName,
+        enabled,
+        mustChangePassword,
+        deletedAtMs,
+        unavailableReason,
+        createdAtMs,
+        updatedAtMs,
+        version,
+        null);
+  }
+}

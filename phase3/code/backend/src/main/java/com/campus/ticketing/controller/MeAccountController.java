@@ -19,6 +19,14 @@ public class MeAccountController {
   private final ApiResponses responses;
   private final AccountService accountService;
 
+  @ApiContract(id = "ME-27", idempotency = true)
+  @PreAuthorize("hasAnyRole('PARTICIPANT','ORGANIZER')")
+  @PatchMapping("/me/phone")
+  public ResponseEntity<ApiResponse<Views.ChangedPhone>> changePhone(
+      @CurrentRequest RequestContext c, @Valid @RequestBody Requests.ChangePhone r) {
+    return responses.toResponse(accountService.changePhone(c, r));
+  }
+
   public MeAccountController(ApiResponses responses, AccountService accountService) {
     this.responses = responses;
     this.accountService = accountService;

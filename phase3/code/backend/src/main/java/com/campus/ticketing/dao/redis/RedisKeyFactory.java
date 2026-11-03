@@ -13,10 +13,18 @@ public class RedisKeyFactory {
   }
 
   public String authRate(String action, String dimension, String fingerprint) {
-    if (!java.util.Set.of("login", "register", "recovery").contains(action)
+    if (!java.util.Set.of("login", "register", "recovery", "phone-code").contains(action)
         || !java.util.Set.of("client", "account", "pair").contains(dimension)
         || !fingerprint.matches("[0-9a-f]{64}"))
       throw new IllegalArgumentException("Invalid rate key dimensions");
     return prefix + "rate:" + action + ":" + dimension + ":" + fingerprint;
+  }
+
+  public String phoneCode(String purpose, String fingerprint) {
+    if (!java.util.Set.of("LOGIN", "REGISTER", "RESET_PASSWORD", "RECOVERY_CONTACT", "CHANGE_PHONE")
+            .contains(purpose)
+        || !fingerprint.matches("[0-9a-f]{64}"))
+      throw new IllegalArgumentException("Invalid phone code key");
+    return prefix + "otp:" + purpose.toLowerCase(java.util.Locale.ROOT) + ":" + fingerprint;
   }
 }

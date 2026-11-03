@@ -9,6 +9,9 @@ import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 
 public interface AccountService {
+  UseCaseResult<Views.ChangedPhone> changePhone(
+      RequestContext context, Requests.ChangePhone request);
+
   UseCaseResult<Views.Identity> currentUser(RequestContext context);
 
   UseCaseResult<Mutation<Views.UserView>> updateProfile(

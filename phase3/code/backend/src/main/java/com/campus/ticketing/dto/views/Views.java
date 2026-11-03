@@ -54,6 +54,9 @@ public final class Views {
 
   public record Csrf(String token, String headerName) {}
 
+  public record PhoneCodeReceipt(
+      UUID verificationId, OffsetDateTime expiresAt, int resendAfterSeconds, String delivery) {}
+
   public record UserView(
       UUID id,
       String username,
@@ -94,7 +97,13 @@ public final class Views {
       RecoveryStatus status,
       OffsetDateTime createdAt,
       String verificationNote,
-      OffsetDateTime resolvedAt) {}
+      OffsetDateTime resolvedAt,
+      String currentPhone,
+      String role,
+      String statement,
+      String pastBehavior,
+      OffsetDateTime contactVerifiedAt,
+      List<String> historicalHints) {}
 
   public record ClosureBlocker(String code, String message, String objectType, UUID objectId) {}
 
@@ -110,6 +119,7 @@ public final class Views {
       UUID id,
       String username,
       Role role,
+      String maskedPhone,
       boolean enabled,
       OffsetDateTime deletedAt,
       boolean mustChangePassword,
@@ -605,6 +615,8 @@ public final class Views {
   public record LoggedOut(boolean loggedOut) {}
 
   public record ChangedPassword(boolean changed, boolean requiresLogin) {}
+
+  public record ChangedPhone(String maskedPhone, boolean requiresLogin) {}
 
   public record ClosedAccount(boolean closed, boolean requiresLogin) {}
 

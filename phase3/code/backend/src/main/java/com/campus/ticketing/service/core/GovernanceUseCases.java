@@ -519,7 +519,13 @@ public class GovernanceUseCases {
     b.db().insert(restriction);
     for (var fact : facts)
       b.db().insert(new RestrictionFactEntity(id(), restriction.id(), fact.id()));
-    for (var user : b.list(UserEntity.class, and(eq("phoneIdentityId", phone), nil("deletedAtMs"))))
+    for (var user :
+        b.list(
+            UserEntity.class,
+            and(
+                eq("phoneIdentityId", phone),
+                eq("role", kind.equals("PUBLISH") ? "ORGANIZER" : "PARTICIPANT"),
+                nil("deletedAtMs"))))
       b.notify(
           user.id(),
           "RESTRICTION:" + restriction.id(),

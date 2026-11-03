@@ -19,11 +19,14 @@ public class AdminAccountUseCases {
   private final BusinessSupport b;
   private final IdentityUseCases identity;
   private final EventUseCases events;
+  private final LocalSmsDelivery sms;
 
-  public AdminAccountUseCases(BusinessSupport b, IdentityUseCases identity, EventUseCases events) {
+  public AdminAccountUseCases(
+      BusinessSupport b, IdentityUseCases identity, EventUseCases events, LocalSmsDelivery sms) {
     this.b = b;
     this.identity = identity;
     this.events = events;
+    this.sms = sms;
   }
 
   private CheckerAssignmentEntity assignment(UUID user) {
@@ -39,6 +42,10 @@ public class AdminAccountUseCases {
         u.id(),
         u.username(),
         Role.valueOf(u.role()),
+        u.phoneIdentityId() == null
+            ? null
+            : IdentityUseCases.mask(
+                b.need(PhoneIdentityEntity.class, loginPhoneId(u), false).phone()),
         u.enabled(),
         b.time(u.deletedAtMs()),
         u.mustChangePassword(),
@@ -334,7 +341,53 @@ public class AdminAccountUseCases {
         RecoveryStatus.valueOf(r.status()),
         b.time(r.createdAtMs()),
         r.verificationNote(),
-        b.time(r.resolvedAtMs()));
+        b.time(r.resolvedAtMs()),
+        r.currentPhone(),
+        r.role(),
+        r.statement(),
+        r.pastBehavior(),
+        b.time(r.contactVerifiedAtMs()),
+        recoveryHints(r));
+  }
+
+  private List<String> recoveryHints(RecoveryEntity r) {
+    if (r.targetAccountId() == null) return List.of();
+    var user = b.need(UserEntity.class, r.targetAccountId(), false);
+    List<String> hints = new ArrayList<>();
+    hints.add("注册时间：" + b.time(user.createdAtMs()));
+    if (user.role().equals("PARTICIPANT")) {
+      for (var order :
+          b.db()
+              .select(
+                  OrderEntity.class,
+                  eq("userId", user.id()),
+                  List.of(RecordStore.Sort.desc("createdAtMs"), RecordStore.Sort.asc("id")),
+                  5,
+                  0,
+                  false))
+        hints.add(
+            "本人订单："
+                + order.eventNameSnapshot()
+                + " / "
+                + order.sessionNameSnapshot()
+                + " / "
+                + order.status()
+                + " / "
+                + b.time(order.createdAtMs()));
+    } else if (user.role().equals("ORGANIZER")) {
+      for (var event :
+          b.db()
+              .select(
+                  EventEntity.class,
+                  eq("organizerId", user.id()),
+                  List.of(RecordStore.Sort.desc("createdAtMs"), RecordStore.Sort.asc("id")),
+                  5,
+                  0,
+                  false))
+        hints.add(
+            "自建活动：" + event.name() + " / " + event.status() + " / " + b.time(event.createdAtMs()));
+    }
+    return hints;
   }
 
   public UseCaseResult<PageResult<Views.RecoveryView>> listRecoveries(
@@ -363,10 +416,9 @@ public class AdminAccountUseCases {
         u.deletedAtMs() == null
             && r.targetAccountId() != null
             && r.targetAccountId().equals(u.id())
-            && u.phoneIdentityId() != null
-            && b.need(PhoneIdentityEntity.class, u.phoneIdentityId(), false)
-                .phone()
-                .equals(r.phone()),
+            && loginPhoneId(u) != null
+            && (r.role() == null || r.role().equals(u.role()))
+            && b.need(PhoneIdentityEntity.class, loginPhoneId(u), false).phone().equals(r.phone()),
         "STATE_CONFLICT",
         "找回依据与原账号身份不符或已失效");
   }
@@ -376,6 +428,9 @@ public class AdminAccountUseCases {
     return b.write(
         () -> {
           b.actor(c, Role.ADMIN);
+          var initial = b.need(RecoveryEntity.class, requestId, false);
+          if (r.decision() == RecoveryDecision.VERIFIED && initial.targetAccountId() != null)
+            lockAccounts(c, initial.targetAccountId());
           var x =
               b.change(
                   c,
@@ -405,6 +460,13 @@ public class AdminAccountUseCases {
                                 b.now(),
                                 "resolvedAtMs",
                                 r.decision() == RecoveryDecision.REJECTED ? b.now() : null));
+                    if (r.decision() == RecoveryDecision.VERIFIED && r.initialPassword() != null) {
+                      valid(r.reason() != null && !r.reason().isBlank(), "请填写审核与重置理由");
+                      resetPassword(
+                          c,
+                          old.targetAccountId(),
+                          new Requests.ResetPassword(r.initialPassword(), r.reason(), old.id()));
+                    }
                     return requestId;
                   });
           return ok(x.current());
@@ -449,7 +511,21 @@ public class AdminAccountUseCases {
                       require(
                           recovery.status().equals("VERIFIED"), "STATE_CONFLICT", "找回依据尚未通过或已经消费");
                       matchingRecovery(recovery, u);
+                      require(
+                          recovery.currentPhone() != null
+                              && recovery.contactVerifiedAtMs() != null
+                              && recovery.statement() != null
+                              && recovery.pastBehavior() != null,
+                          "RECOVERY_NEEDS_DETAILS",
+                          "旧申请缺少完整陈述或当前手机号验证，请重新提交申诉");
+                      sms.ensureAvailable();
+                      u = identity.bindPhone(u, recovery.currentPhone());
                       b.db().save(copy(recovery, "status", "RESOLVED", "resolvedAtMs", b.now()));
+                      sms.recovery(
+                          recovery.currentPhone(),
+                          u.username(),
+                          r.initialPassword(),
+                          recovery.id());
                     }
                     b.db()
                         .save(

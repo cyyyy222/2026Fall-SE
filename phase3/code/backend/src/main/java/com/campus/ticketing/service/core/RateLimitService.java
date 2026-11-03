@@ -61,7 +61,7 @@ public class RateLimitService {
                 new Limit("client", client, 60, 60),
                 new Limit("account", normalized, 30, 60),
                 new Limit("pair", client.length() + ":" + client + ":" + normalized, 10, 60))
-            : List.of(new Limit("client", client, 5, 600));
+            : List.of(new Limit("client", client, action.equals("phone-code") ? 20 : 5, 600));
     long retry = 0;
     try {
       for (var limit : limits) {

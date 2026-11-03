@@ -43,11 +43,20 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
         context.setAuthentication(authentication);
         org.springframework.security.core.context.SecurityContextHolder.setContext(context);
       } catch (com.campus.ticketing.common.ApiException e) {
-        boolean publicRead =
+        boolean publicRequest =
             req.getMethod().equals("GET")
-                && (req.getRequestURI().startsWith("/api/public/")
-                    || req.getRequestURI().equals("/api/auth/csrf"));
-        if (publicRead && (e.status() == 401 || e.status() == 403)) {
+                    && (req.getRequestURI().startsWith("/api/public/")
+                        || req.getRequestURI().equals("/api/auth/csrf"))
+                || req.getMethod().equals("POST")
+                    && java.util.Set.of(
+                            "/api/auth/login",
+                            "/api/auth/register",
+                            "/api/auth/recoveries",
+                            "/api/auth/phone-codes",
+                            "/api/auth/phone-login",
+                            "/api/auth/password-reset")
+                        .contains(req.getRequestURI());
+        if (e.status() == 401 || e.status() == 403) {
           res.addHeader(
               "Set-Cookie",
               org.springframework.http.ResponseCookie.from("TICKET_SESSION", "")
@@ -56,8 +65,10 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
                   .sameSite("Lax")
                   .secure(req.isSecure())
                   .maxAge(java.time.Duration.ZERO)
+                  .build()
                   .toString());
-        } else {
+        }
+        if (!publicRequest || (e.status() != 401 && e.status() != 403)) {
           errors.write(res, e.status(), e.code(), e.getMessage());
           return;
         }

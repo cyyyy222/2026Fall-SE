@@ -19,6 +19,14 @@ public class AuthController {
   private final ApiResponses responses;
   private final AuthService authService;
 
+  @ApiContract(id = "AUTH-08", idempotency = false)
+  @PreAuthorize("permitAll()")
+  @PostMapping("/auth/password-reset")
+  public ResponseEntity<ApiResponse<Views.ChangedPassword>> phonePasswordReset(
+      @CurrentRequest RequestContext c, @Valid @RequestBody Requests.PhonePasswordReset r) {
+    return responses.toResponse(authService.resetPasswordByPhone(c, r));
+  }
+
   public AuthController(ApiResponses responses, AuthService authService) {
     this.responses = responses;
     this.authService = authService;
@@ -72,5 +80,21 @@ public class AuthController {
   public ResponseEntity<ApiResponse<Views.LoggedOut>> logout(
       @CurrentRequest RequestContext context, @Valid @RequestBody Requests.Empty request) {
     return responses.toResponse(authService.logout(context, request));
+  }
+
+  @ApiContract(id = "AUTH-06", idempotency = false)
+  @PreAuthorize("permitAll()")
+  @PostMapping("/auth/phone-codes")
+  public ResponseEntity<ApiResponse<Views.PhoneCodeReceipt>> phoneCode(
+      @CurrentRequest RequestContext c, @Valid @RequestBody Requests.PhoneCode r) {
+    return responses.toResponse(authService.issuePhoneCode(c, r));
+  }
+
+  @ApiContract(id = "AUTH-07", idempotency = false)
+  @PreAuthorize("permitAll()")
+  @PostMapping("/auth/phone-login")
+  public ResponseEntity<ApiResponse<Views.Identity>> phoneLogin(
+      @CurrentRequest RequestContext c, @Valid @RequestBody Requests.PhoneLogin r) {
+    return responses.toResponse(authService.phoneLogin(c, r));
   }
 }

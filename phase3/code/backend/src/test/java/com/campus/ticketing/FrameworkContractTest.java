@@ -100,7 +100,7 @@ class FrameworkContractTest {
                               .forEach(
                                   method -> actual.add(contract.id() + " " + method + " " + path)));
             });
-    assertThat(expected).hasSize(89);
+    assertThat(expected).hasSize(93);
     assertThat(actual).isEqualTo(expected);
   }
 
@@ -256,6 +256,35 @@ class FrameworkContractTest {
                 json.readValue(
                     "{\"expectedVersion\":1,\"enabled\":\"false\"}", Requests.UpdateAccount.class))
         .isInstanceOf(com.fasterxml.jackson.core.JsonProcessingException.class);
+  }
+
+  @Test
+  void registrationAcceptsMissingOrCommonSuffixEmailsAndExplainsInvalidFields() throws Exception {
+    String base =
+        "{\"username\":\"student\",\"password\":\"Password123\",\"phone\":\"13990000008\",\"role\":\"PARTICIPANT\",\"verificationId\":\""
+            + UUID.randomUUID()
+            + "\",\"verificationCode\":\"123456\"";
+    for (String extra :
+        List.of(
+            "",
+            ",\"email\":null",
+            ",\"email\":\"\"",
+            ",\"email\":\"123456@qq.com\"",
+            ",\"email\":\"name@163.com\"",
+            ",\"email\":\"name@nju.edu.cn\"")) {
+      var request = json.readValue(base + extra + "}", Requests.Register.class);
+      assertThat(validator.validate(request)).isEmpty();
+    }
+    var invalid = json.readValue(base + ",\"email\":\"not-an-email\"}", Requests.Register.class);
+    assertThat(validator.validate(invalid))
+        .anyMatch(v -> v.getPropertyPath().toString().equals("email"));
+    mvc.perform(
+            post("/api/auth/register")
+                .with(realCsrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(base.replace("Password123", "12345678") + "}"))
+        .andExpect(status().isUnprocessableEntity())
+        .andExpect(jsonPath("$.errors[0].field").value("password"));
   }
 
   @Test

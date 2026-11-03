@@ -211,11 +211,50 @@ public class BusinessSupport {
         && db().count(
                     RestrictionEntity.class,
                     and(
-                        eq("phoneIdentityId", identityId),
+                        in("phoneIdentityId", governancePhoneIds(identityId, kind)),
                         eq("kind", kind),
                         le("startsAtMs", now()),
                         gt("endsAtMs", now())))
             > 0;
+  }
+
+  public static UUID loginPhoneId(UserEntity u) {
+    return u.loginPhoneIdentityId() == null ? u.phoneIdentityId() : u.loginPhoneIdentityId();
+  }
+
+  public static RecordStore.Filter currentPhoneFilter(UUID phoneId) {
+    return or(
+        eq("loginPhoneIdentityId", phoneId),
+        and(nil("loginPhoneIdentityId"), eq("phoneIdentityId", phoneId)));
+  }
+
+  public Set<UUID> governancePhoneIds(UUID identityId, String kind) {
+    Set<UUID> ids = new HashSet<>();
+    ids.add(identityId);
+    for (var u :
+        list(
+            UserEntity.class,
+            and(
+                eq("phoneIdentityId", identityId),
+                eq("role", kind.equals("PUBLISH") ? "ORGANIZER" : "PARTICIPANT"),
+                nil("deletedAtMs")))) {
+      if (loginPhoneId(u) != null) ids.add(loginPhoneId(u));
+    }
+    return ids;
+  }
+
+  public void afterCommit(Runnable work) {
+    if (org.springframework.transaction.support.TransactionSynchronizationManager
+        .isSynchronizationActive())
+      org.springframework.transaction.support.TransactionSynchronizationManager
+          .registerSynchronization(
+              new org.springframework.transaction.support.TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                  work.run();
+                }
+              });
+    else work.run();
   }
 
   public long occupied(UUID typeId) {
@@ -293,6 +332,9 @@ public class BusinessSupport {
 
   private boolean containsPassword(Object value) {
     return value instanceof com.campus.ticketing.dto.requests.Requests.Password
+        || value instanceof com.campus.ticketing.dto.requests.Requests.ChangePhone
+        || value instanceof com.campus.ticketing.dto.requests.Requests.PhonePasswordReset
+        || value instanceof com.campus.ticketing.dto.requests.Requests.ResolveRecovery
         || value instanceof com.campus.ticketing.dto.requests.Requests.CreateAccount
         || value instanceof com.campus.ticketing.dto.requests.Requests.ResetPassword
         || value instanceof com.campus.ticketing.dto.requests.Requests.Closure

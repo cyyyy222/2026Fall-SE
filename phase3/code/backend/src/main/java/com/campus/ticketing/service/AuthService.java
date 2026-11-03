@@ -9,6 +9,14 @@ import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 
 public interface AuthService {
+  UseCaseResult<Views.ChangedPassword> resetPasswordByPhone(
+      RequestContext context, Requests.PhonePasswordReset request);
+
+  UseCaseResult<Views.PhoneCodeReceipt> issuePhoneCode(
+      RequestContext context, Requests.PhoneCode request);
+
+  UseCaseResult<Views.Identity> phoneLogin(RequestContext context, Requests.PhoneLogin request);
+
   UseCaseResult<Views.Identity> login(RequestContext context, Requests.Login request);
 
   UseCaseResult<Views.Registered> register(RequestContext context, Requests.Register request);

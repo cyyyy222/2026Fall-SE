@@ -20,14 +20,71 @@ public final class Requests {
 
   public record Register(
       @NotNull @CodePointLength(min = 1, max = 60) String username,
-      @NotNull @Pattern(regexp = "(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{8,72}") String password,
-      @NotNull @Email @Size(max = 254) String email,
+      @NotNull
+          @Pattern(
+              regexp = "(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{8,72}",
+              message = "密码须为8～72位ASCII字母和数字组合")
+          String password,
+      @Email(message = "邮箱格式不正确，例如12345@qq.com") @Size(max = 254) String email,
       @NotNull @Pattern(regexp = "[0-9]{11}") String phone,
-      @NotNull RegisterRole role) {}
+      @NotNull RegisterRole role,
+      @NotNull UUID verificationId,
+      @NotNull @Pattern(regexp = "[0-9]{6}") String verificationCode) {
+    public Register {
+      email = email == null || email.isBlank() ? null : email.strip();
+    }
+
+    public Register(
+        String username, String password, String email, String phone, RegisterRole role) {
+      this(username, password, email, phone, role, null, null);
+    }
+  }
+
+  public enum PhoneCodePurpose {
+    LOGIN,
+    REGISTER,
+    RESET_PASSWORD,
+    RECOVERY_CONTACT,
+    CHANGE_PHONE
+  }
+
+  public record PhoneCode(
+      @NotNull @Pattern(regexp = "1[0-9]{10}") String phone,
+      @NotNull RegisterRole role,
+      @NotNull PhoneCodePurpose purpose) {}
+
+  public record PhoneLogin(
+      @NotNull @Pattern(regexp = "1[0-9]{10}") String phone,
+      @NotNull RegisterRole role,
+      @NotNull UUID verificationId,
+      @NotNull @Pattern(regexp = "[0-9]{6}") String verificationCode,
+      @NotNull PhoneCodePurpose purpose) {}
 
   public record Recovery(
       @NotNull @CodePointLength(min = 1, max = 60) String account,
-      @NotNull @Pattern(regexp = "[0-9]{11}") String phone) {}
+      @NotNull @Pattern(regexp = "1[0-9]{10}") String phone,
+      @NotNull RegisterRole role,
+      @NotNull @Pattern(regexp = "1[0-9]{10}") String currentPhone,
+      @NotNull @CodePointLength(min = 20, max = 2000) String statement,
+      @NotNull @CodePointLength(min = 20, max = 2000) String pastBehavior,
+      @NotNull UUID verificationId,
+      @NotNull @Pattern(regexp = "[0-9]{6}") String verificationCode) {}
+
+  public record PhonePasswordReset(
+      @NotNull @Pattern(regexp = "1[0-9]{10}") String phone,
+      @NotNull RegisterRole role,
+      @NotNull UUID verificationId,
+      @NotNull @Pattern(regexp = "[0-9]{6}") String verificationCode,
+      @NotNull
+          @Pattern(
+              regexp = "(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{8,72}",
+              message = "新密码须为8～72位ASCII字母和数字组合")
+          String newPassword) {}
+
+  public record ChangePhone(
+      @NotNull @Pattern(regexp = "1[0-9]{10}") String newPhone,
+      @NotNull UUID verificationId,
+      @NotNull @Pattern(regexp = "[0-9]{6}") String verificationCode) {}
 
   public record Profile(@NotNull @CodePointLength(min = 1, max = 60) String displayName) {}
 
@@ -148,7 +205,13 @@ public final class Requests {
 
   public record ResolveRecovery(
       @NotNull RecoveryDecision decision,
-      @NotNull @CodePointLength(min = 1, max = 2000) String verificationNote) {}
+      @NotNull @CodePointLength(min = 10, max = 2000) String verificationNote,
+      @Pattern(regexp = "(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{8,72}") String initialPassword,
+      @CodePointLength(min = 1, max = 200) String reason) {
+    public ResolveRecovery(RecoveryDecision decision, String verificationNote) {
+      this(decision, verificationNote, null, null);
+    }
+  }
 
   public record CreateCategory(@NotNull @CodePointLength(min = 1, max = 60) String name) {}
 

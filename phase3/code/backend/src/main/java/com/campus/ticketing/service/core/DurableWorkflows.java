@@ -960,7 +960,12 @@ public class DurableWorkflows {
             for (var u :
                 b.list(
                     UserEntity.class,
-                    and(eq("phoneIdentityId", r.phoneIdentityId()), nil("deletedAtMs"))))
+                    and(
+                        or(
+                            eq("phoneIdentityId", r.phoneIdentityId()),
+                            eq("loginPhoneIdentityId", r.phoneIdentityId())),
+                        eq("role", r.kind().equals("PUBLISH") ? "ORGANIZER" : "PARTICIPANT"),
+                        nil("deletedAtMs"))))
               b.notify(
                   u.id(),
                   "RESTRICTION_END:" + r.id(),

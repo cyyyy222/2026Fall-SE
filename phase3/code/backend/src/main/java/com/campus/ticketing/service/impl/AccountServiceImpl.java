@@ -18,10 +18,30 @@ import org.springframework.web.bind.annotation.*;
 public class AccountServiceImpl implements AccountService {
   private final BusinessSupport support;
   private final IdentityUseCases identityUseCases;
+  private final PhoneCodeUseCases phoneCodes;
 
-  public AccountServiceImpl(BusinessSupport support, IdentityUseCases identityUseCases) {
+  public AccountServiceImpl(
+      BusinessSupport support, IdentityUseCases identityUseCases, PhoneCodeUseCases phoneCodes) {
     this.support = support;
     this.identityUseCases = identityUseCases;
+    this.phoneCodes = phoneCodes;
+  }
+
+  @Override
+  public UseCaseResult<Views.ChangedPhone> changePhone(RequestContext c, Requests.ChangePhone r) {
+    return identityUseCases.changePhone(
+        c,
+        r,
+        () -> {
+          var u = support.actor(c, Role.PARTICIPANT, Role.ORGANIZER);
+          phoneCodes.verify(
+              r.newPhone(),
+              RegisterRole.valueOf(u.role()),
+              Requests.PhoneCodePurpose.CHANGE_PHONE,
+              r.verificationId(),
+              r.verificationCode(),
+              true);
+        });
   }
 
   @Override

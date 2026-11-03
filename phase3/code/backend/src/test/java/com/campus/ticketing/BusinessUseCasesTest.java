@@ -501,6 +501,118 @@ class BusinessUseCasesTest {
   }
 
   @Test
+  void phoneCanBeSharedAcrossRolesButNotByTwoActiveAccountsOfTheSameRole() {
+    var participant = b.need(UserEntity.class, alice, false);
+    String phone = b.need(PhoneIdentityEntity.class, participant.phoneIdentityId(), false).phone();
+    var c = new RequestContext(null, null, "phone-role-test");
+    var organizer =
+        identity.register(
+            c,
+            new Requests.Register(
+                "samephoneorganizer",
+                "Testpass123",
+                "samephoneorganizer@example.test",
+                phone,
+                RegisterRole.ORGANIZER));
+    assertThat(organizer.status()).isEqualTo(201);
+    assertThat(b.need(UserEntity.class, organizer.data().id(), false).phoneIdentityId())
+        .isEqualTo(participant.phoneIdentityId());
+    for (var role : RegisterRole.values()) {
+      assertThatThrownBy(
+              () ->
+                  identity.register(
+                      c,
+                      new Requests.Register(
+                          "duplicate" + role.name(),
+                          "Testpass123",
+                          role.name() + "@example.test",
+                          phone,
+                          role)))
+          .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.status()).isEqualTo(422));
+    }
+    // The phone exception does not relax username/email uniqueness across roles.
+    assertThatThrownBy(
+            () ->
+                identity.register(
+                    c,
+                    new Requests.Register(
+                        participant.username(),
+                        "Testpass123",
+                        "another@example.test",
+                        "13999999001",
+                        RegisterRole.ORGANIZER)))
+        .isInstanceOf(ApiException.class);
+    assertThatThrownBy(
+            () ->
+                identity.register(
+                    c,
+                    new Requests.Register(
+                        "anotherorganizer",
+                        "Testpass123",
+                        participant.email(),
+                        "13999999002",
+                        RegisterRole.ORGANIZER)))
+        .isInstanceOf(ApiException.class);
+  }
+
+  @Test
+  void accountModulesFilterByRoleAndExposeOnlyMaskedPhones() {
+    var accounts =
+        new AdminAccountUseCases(
+            b, identity, events, new LocalSmsDelivery(b, new MockEnvironment()));
+    for (Role role : Role.values()) {
+      var page =
+          accounts
+              .listAccounts(
+                  actor(admin),
+                  new com.campus.ticketing.dto.queries.Queries.Accounts(
+                      role, null, null, null, null, 1, 100))
+              .data();
+      assertThat(page.items()).isNotEmpty().allMatch(a -> a.role() == role);
+      for (var account : page.items()) {
+        if (role == Role.ADMIN || role == Role.CHECKER) assertThat(account.maskedPhone()).isNull();
+        else assertThat(account.maskedPhone()).contains("****").hasSize(11);
+      }
+    }
+  }
+
+  @Test
+  void restrictionsAndNotificationsRemainScopedToRoleWhenPhoneIsShared() {
+    var participant = b.need(UserEntity.class, alice, false);
+    String phone = b.need(PhoneIdentityEntity.class, participant.phoneIdentityId(), false).phone();
+    var registered =
+        identity.register(
+            new RequestContext(null, null, "role-test"),
+            new Requests.Register(
+                "sharedorganizer",
+                "Testpass123",
+                "shared@example.test",
+                phone,
+                RegisterRole.ORGANIZER));
+    var organizer = b.need(UserEntity.class, registered.data().id(), false);
+    db.insert(
+        new RestrictionEntity(
+            UUID.randomUUID(),
+            participant.phoneIdentityId(),
+            "REGISTER",
+            b.now() - 1000,
+            b.now() + 1000,
+            "test",
+            admin,
+            null));
+    var userView =
+        (com.campus.ticketing.dto.views.Views.UserView)
+            identity.identity(organizer, b.now() + 10000);
+    assertThat(userView.restrictions()).isEmpty();
+    assertThat(b.restricted(organizer.phoneIdentityId(), "PUBLISH")).isFalse();
+    assertThat(b.restricted(participant.phoneIdentityId(), "REGISTER")).isTrue();
+    clock.advance(Duration.ofSeconds(2));
+    workflows.reconcileRestrictionMessages();
+    assertThat(db.count(MessageEntity.class, eq("recipientId", alice))).isEqualTo(1);
+    assertThat(db.count(MessageEntity.class, eq("recipientId", organizer.id()))).isZero();
+  }
+
+  @Test
   void loginHashesTokensAndSecondLoginRevokesWithoutSlidingExpiry() {
     var user = b.need(UserEntity.class, alice, false);
     db.save(copy(user, "passwordHash", identity.passwordEncoder().encode("Password123")));
@@ -686,5 +798,137 @@ class BusinessUseCasesTest {
     workflows.runDue();
     assertThat(db.count(JobEntity.class, eq("type", "JOB-01"))).isEqualTo(1);
     assertThat(db.count(MessageEntity.class, eq("recipientId", alice))).isEqualTo(notifications);
+  }
+
+  @Test
+  void emailCanBeOmittedByMultipleUsersAndQqAddressesAreAccepted() {
+    var c = new RequestContext(null, null, "email-test");
+    for (int i = 1; i <= 2; i++) {
+      var created =
+          identity.register(
+              c,
+              new Requests.Register(
+                  "optionalmail" + i,
+                  "Password123",
+                  i == 1 ? null : "  ",
+                  "1399000000" + i,
+                  RegisterRole.PARTICIPANT));
+      assertThat(b.need(UserEntity.class, created.data().id(), false).email()).isNull();
+    }
+    var qq =
+        identity.register(
+            c,
+            new Requests.Register(
+                "qqmail",
+                "Password123",
+                " 123456@qq.com ",
+                "13990000003",
+                RegisterRole.PARTICIPANT));
+    assertThat(b.need(UserEntity.class, qq.data().id(), false).email()).isEqualTo("123456@qq.com");
+  }
+
+  @Test
+  void phoneRebindingUsesOnlyNewPhoneProofAndKeepsBusinessIdentityAndOrders() {
+    var u = b.need(UserEntity.class, alice, false);
+    var oldPhone = b.need(PhoneIdentityEntity.class, u.phoneIdentityId(), false).phone();
+    var c = actor(alice);
+    UUID orderId = orders.register(c, registration(UUID.randomUUID())).data().current().id();
+    db.insert(
+        new RestrictionEntity(
+            UUID.randomUUID(),
+            u.phoneIdentityId(),
+            "REGISTER",
+            b.now() - 1000,
+            b.now() + 60000,
+            "keep prior facts",
+            admin,
+            null));
+    int[] verifies = {0};
+    var request = new Requests.ChangePhone("13990000004", UUID.randomUUID(), "123456");
+    var changed = identity.changePhone(c, request, () -> verifies[0]++);
+    assertThat(changed.data().maskedPhone()).isEqualTo("139****0004");
+    assertThat(changed.data().requiresLogin()).isTrue();
+    assertThat(verifies[0]).isEqualTo(1);
+    var current = b.need(UserEntity.class, alice, false);
+    assertThat(current.phoneIdentityId()).isEqualTo(u.phoneIdentityId());
+    assertThat(current.loginPhoneIdentityId()).isNotEqualTo(u.phoneIdentityId());
+    assertThat(b.need(OrderEntity.class, orderId, false).phoneIdentityId())
+        .isEqualTo(u.phoneIdentityId());
+    assertThat(b.restricted(current.phoneIdentityId(), "REGISTER")).isTrue();
+    assertThat(identity.hasPhoneAccount(oldPhone, RegisterRole.PARTICIPANT)).isFalse();
+    assertThat(identity.hasPhoneAccount(request.newPhone(), RegisterRole.PARTICIPANT)).isTrue();
+    identity.changePhone(c, request, () -> verifies[0]++);
+    assertThat(verifies[0]).isEqualTo(1);
+    var bobPhone =
+        b.need(
+                PhoneIdentityEntity.class,
+                b.need(UserEntity.class, bob, false).phoneIdentityId(),
+                false)
+            .phone();
+    assertThatThrownBy(
+            () ->
+                identity.changePhone(
+                    actor(alice),
+                    new Requests.ChangePhone(bobPhone, UUID.randomUUID(), "123456"),
+                    () -> {}))
+        .isInstanceOfSatisfying(
+            ApiException.class, e -> assertThat(e.code()).isEqualTo("PHONE_ALREADY_BOUND"));
+  }
+
+  @Test
+  void phoneCodePasswordResetRevokesSessionsAndDoesNotRequireTheOldPassword() {
+    var u = b.need(UserEntity.class, alice, false);
+    db.save(copy(u, "passwordHash", identity.passwordEncoder().encode("Before123")));
+    var c = new RequestContext(null, null, "reset-test");
+    var session = identity.login(c, new Requests.Login("alice", "Before123"));
+    String token =
+        session.cookies().stream()
+            .filter(x -> x.getName().equals("TICKET_SESSION"))
+            .findFirst()
+            .orElseThrow()
+            .getValue();
+    String phone = b.need(PhoneIdentityEntity.class, u.phoneIdentityId(), false).phone();
+    identity.resetPasswordByPhone(
+        c,
+        new Requests.PhonePasswordReset(
+            phone, RegisterRole.PARTICIPANT, UUID.randomUUID(), "123456", "After123"));
+    assertThatThrownBy(() -> identity.authenticate(token)).isInstanceOf(ApiException.class);
+    assertThat(identity.login(c, new Requests.Login("alice", "After123")).status()).isEqualTo(200);
+    assertThat(b.need(UserEntity.class, alice, false).mustChangePassword()).isFalse();
+  }
+
+  @Test
+  void detailedRecoveryApprovalRebindsResetsAndNotifiesOnlyOnce() {
+    var u = b.need(UserEntity.class, alice, false);
+    String phone = b.need(PhoneIdentityEntity.class, u.phoneIdentityId(), false).phone();
+    var appeal =
+        identity.requestRecovery(
+            new RequestContext(null, null, "appeal-test"),
+            new Requests.Recovery(
+                "alice",
+                phone,
+                RegisterRole.PARTICIPANT,
+                "13990000005",
+                "原手机号已经停止使用，需要提供历史资料申请恢复本人账号。",
+                "过去报名过校园音乐会，可以提供日期以及票种等信息请管理员核对。",
+                UUID.randomUUID(),
+                "123456"));
+    var delivery = mock(LocalSmsDelivery.class);
+    var accounts = new AdminAccountUseCases(b, identity, events, delivery);
+    var c = actor(admin);
+    var approval =
+        new Requests.ResolveRecovery(
+            RecoveryDecision.VERIFIED, "已核对原手机号、本人陈述及历史订单，确认申请人为账号本人。", "Temporary123", "本人资料核验通过");
+    var response = accounts.resolveRecovery(c, appeal.data().requestId(), approval);
+    assertThat(response.data().status()).isEqualTo(RecoveryStatus.RESOLVED);
+    var changed = b.need(UserEntity.class, alice, false);
+    assertThat(changed.mustChangePassword()).isTrue();
+    assertThat(identity.passwordEncoder().matches("Temporary123", changed.passwordHash())).isTrue();
+    assertThat(changed.phoneIdentityId()).isEqualTo(u.phoneIdentityId());
+    assertThat(identity.hasPhoneAccount("13990000005", RegisterRole.PARTICIPANT)).isTrue();
+    verify(delivery).recovery("13990000005", "alice", "Temporary123", appeal.data().requestId());
+    accounts.resolveRecovery(c, appeal.data().requestId(), approval);
+    verify(delivery, times(1)).recovery(anyString(), anyString(), anyString(), any());
+    assertThat(response.data().statement()).contains("原手机号");
   }
 }

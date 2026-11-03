@@ -21,6 +21,32 @@ public class RedisTransientDao {
     this.redis = redis;
   }
 
+  private static final DefaultRedisScript<Long> ISSUE_CODE =
+      new DefaultRedisScript<>(
+          "if not redis.call('SET',KEYS[2],'1','NX','EX',60) then return 0 end; "
+              + "redis.call('HSET',KEYS[1],'id',ARGV[1],'hash',ARGV[2],'attempts',5); "
+              + "redis.call('EXPIRE',KEYS[1],300); return 1",
+          Long.class);
+
+  private static final DefaultRedisScript<Long> VERIFY_CODE =
+      new DefaultRedisScript<>(
+          "if redis.call('HGET',KEYS[1],'id')~=ARGV[1] then return 0 end; if"
+              + " redis.call('HGET',KEYS[1],'hash')~=ARGV[2] then local"
+              + " n=redis.call('HINCRBY',KEYS[1],'attempts',-1); if n<=0 then"
+              + " redis.call('DEL',KEYS[1]) end; return -1 end; if ARGV[3]=='1' then"
+              + " redis.call('DEL',KEYS[1]) end; return 1",
+          Long.class);
+
+  public boolean issuePhoneCode(String key, String cooldownKey, String id, String hash) {
+    return Long.valueOf(1).equals(redis.execute(ISSUE_CODE, List.of(key, cooldownKey), id, hash));
+  }
+
+  public long verifyPhoneCode(String key, String id, String hash, boolean consume) {
+    Long result = redis.execute(VERIFY_CODE, List.of(key), id, hash, consume ? "1" : "0");
+    if (result == null) throw new IllegalStateException("No phone code verification result");
+    return result;
+  }
+
   public long incrementWindow(String key, Duration ttl) {
     if (ttl.isNegative() || ttl.isZero())
       throw new IllegalArgumentException("TTL must be positive");

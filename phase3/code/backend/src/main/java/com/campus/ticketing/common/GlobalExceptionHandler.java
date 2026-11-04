@@ -179,7 +179,7 @@ public class GlobalExceptionHandler {
 
   @ExceptionHandler(Exception.class)
   ResponseEntity<ApiErrorResponse> unexpected(Exception e) {
-    LOG.error("Unhandled API exception type={}", e.getClass().getName());
+    LOG.error("Unhandled API exception type={}", e.getClass().getName(), e);
     return result(500, "INTERNAL_ERROR", "服务器内部错误，请保留traceId", List.of());
   }
 }
